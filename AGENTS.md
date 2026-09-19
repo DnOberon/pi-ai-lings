@@ -18,7 +18,7 @@
 Before submitting changes:
 
 1. Run `npm test` when tests exist.
-2. Run a syntax check for changed JavaScript files, for example `node --check index.js`.
+2. Run a syntax check for changed TypeScript files, for example `node --experimental-strip-types --check index.ts`.
 3. Confirm `git diff --check` is clean.
 
-The repository is currently a minimal scaffold. Do not claim that commands or extension behavior work until an entry point and a corresponding check exist.
+The extension entry point is `index.ts`; keep its Pi package metadata and TypeScript tests in sync.

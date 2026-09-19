@@ -1,0 +1,26 @@
+{
+  "name": "pi-ai-lings",
+  "version": "1.0.0",
+  "description": "The companion Pi extension for https://notyourlanguage.com",
+  "keywords": [
+    "pi"
+  ],
+  "license": "ISC",
+  "author": "John Darrington",
+  "type": "module",
+  "main": "index.ts",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.86.0"
+  },
+  "dependencies": {
+    "typescript": "^7.0.2"
+  }
+}

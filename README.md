@@ -36,7 +36,7 @@ Run the focused tests and syntax check with:
 
 ```sh
 npm test
-node --check index.js
+node --experimental-strip-types --check index.ts
 git diff --check
 ```
 
