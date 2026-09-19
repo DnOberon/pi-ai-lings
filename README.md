@@ -1,6 +1,6 @@
 # pi-ai-lings
 
-A Pi extension for working through the exercises at [notyourlanguage.com](https://notyourlanguage.com). When enabled in a project, it asks a configured model to check each prompt against project rules before Pi sends it to the agent.
+A Pi extension for working through the exercises at [notyourlanguage.com](https://notyourlanguage.substack.com/). When enabled in a project, it asks a configured model to check each prompt against project rules before Pi sends it to the agent.
 
 ## Project setup
 
@@ -42,7 +42,7 @@ git diff --check
 
 ## Scope
 
-The extension provides only the prompt gate. Exercise instructions and answers remain on [notyourlanguage.com](https://notyourlanguage.com); this project should not duplicate them without a specific reason.
+The extension provides only the prompt gate. Exercise instructions and answers remain on [notyourlanguage.com](https://notyourlanguage.substack.com/); this project should not duplicate them without a specific reason.
 
 ## License
 
