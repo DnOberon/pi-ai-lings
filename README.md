@@ -21,6 +21,30 @@ Create `.pi/ai-lings/config.json` and `.pi/ai-lings/RULES.md` in the project whe
 
 `model` is a Pi model slug: the provider name, a slash, and the model ID. For model IDs containing slashes, only the first slash separates the provider.
 
+### EVALUATION.yaml
+
+Optionally create `.pi/ai-lings/EVALUATION.yaml` to track exercise objectives as a live checklist:
+
+```yaml
+exercise_name: Test Exercise
+evaluations:
+  - name: Correct AGENTS.md
+    show: true
+    criteria:
+      - There must be an AGENTS.md present
+      - That AGENTS.md must be relevant to the project
+```
+
+- `name` — unique label for the objective.
+- `show` — when `true`, displays the reason why the objective failed or is incomplete.
+- `criteria` — list of conditions the evaluator model assesses.
+
+### Evaluating objectives with `/al-eval`
+
+Run `/al-eval` to evaluate all objectives against the current prompt and repository state (git, AGENTS.md). The widget updates in place — ✓ for complete, ○ for incomplete with a short reason.
+
+On session start the widget appears empty (all ○). Run `/al-eval` whenever you want a fresh assessment. The evaluator receives the evaluation document, repository facts, and the last prompt sent to the agent.
+
 `RULES.md` is ordinary Markdown containing the rules the evaluator must apply. A prompt is allowed only when the evaluator returns valid JSON with `allow: true`. Missing rules, unknown models, evaluator errors, and malformed evaluator responses reject the prompt rather than bypassing the check.
 
 Disable the check for a project with `"enabled": false` or by removing `config.json`.
