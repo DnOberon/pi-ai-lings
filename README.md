@@ -4,7 +4,7 @@ A [Pi](https://github.com/earendil-works/pi-coding-agent) extension that turns g
 
 ## Anatomy of an exercise
 
-Every exercise lives in `.pi/ai-lings/` inside your project root. Here's the full file set:
+Everything important lives in `.pi/ai-lings/` inside your project root. Here's the full file set:
 
 | File | Purpose | Required?
 | --- | --- | ---
