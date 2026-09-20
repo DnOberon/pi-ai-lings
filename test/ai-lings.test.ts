@@ -49,16 +49,50 @@ test("reads evaluation objectives and their display setting", () => {
   fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(
     path.join(directory, "EVALUATION.yaml"),
-    "exercise_name: Test\nevaluations:\n  - name: Ready\n    show: true\n    criteria:\n      - A file exists\n",
+    "exercise_name: Test\nevaluations:\n  - name: Ready\n    show: true\n    meet_all: true\n    criteria:\n      - A file exists\n",
   );
   assert.deepEqual(readEvaluations(cwd), {
     exerciseName: "Test",
-    evaluations: [{ name: "Ready", show: true, criteria: ["A file exists"] }],
+    evaluations: [
+      {
+        name: "Ready",
+        show: true,
+        criteria: ["A file exists"],
+        meetAll: true,
+      },
+    ],
   });
 });
 
+test("defaults meet_all to false when absent", () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
+  const directory = path.join(cwd, ".pi", "ai-lings");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(
+    path.join(directory, "EVALUATION.yaml"),
+    "evaluations:\n  - name: Ready\n    show: true\n    criteria: [exists, works]\n  - name: Also ready\n    show: false\n    meet_all: false\n    criteria: [works]\n",
+  );
+
+  assert.deepEqual(readEvaluations(cwd)?.evaluations, [
+    {
+      name: "Ready",
+      show: true,
+      criteria: ["exists", "works"],
+      meetAll: false,
+    },
+    {
+      name: "Also ready",
+      show: false,
+      criteria: ["works"],
+      meetAll: false,
+    },
+  ]);
+});
+
 test("parses complete evaluation results", () => {
-  const evaluations = [{ name: "Ready", show: true, criteria: ["exists"] }];
+  const evaluations = [
+    { name: "Ready", show: true, criteria: ["exists"], meetAll: false },
+  ];
   assert.deepEqual(
     parseEvaluationResults(
       {

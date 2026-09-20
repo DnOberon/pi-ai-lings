@@ -30,6 +30,7 @@ exercise_name: Test Exercise
 evaluations:
   - name: Correct AGENTS.md
     show: true
+    meet_all: true
     criteria:
       - There must be an AGENTS.md present
       - That AGENTS.md must be relevant to the project
@@ -37,6 +38,7 @@ evaluations:
 
 - `name` — unique label for the objective.
 - `show` — when `true`, displays the reason why the objective failed or is incomplete.
+- `meet_all` — when `true`, every criterion must be met; when `false` or absent, any one criterion is enough.
 - `criteria` — list of conditions the evaluator model assesses.
 
 ### Evaluating objectives with `/al-eval`
