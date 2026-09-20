@@ -59,7 +59,7 @@ Disable the prompt check and evaluator for a project with `"enabled": false`; th
 
 Requirements:
 
-- Node.js
+- Node.js >= 22.19.0
 - Pi
 
 Run the focused tests and syntax check with:

@@ -12,6 +12,9 @@
   "author": "John Darrington",
   "type": "module",
   "main": "index.ts",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "pi": {
     "extensions": [
       "./index.ts"
