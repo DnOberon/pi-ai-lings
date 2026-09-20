@@ -1,10 +1,10 @@
 # pi-ai-lings
 
-A [Pi](https://github.com/earendil-works/pi-coding-agent) extension that turns guided programming exercises into checkable, rules-enforced sessions. Think "lingo for developers" — you work through exercises at [notyourlanguage.com](https://notyourlanguage.substack.com/) while this extension keeps you honest.
+A [Pi](https://github.com/earendil-works/pi-coding-agent) extension that turns guided programming exercises into checkable, rules-enforced sessions. Work through exercises introduced at [notyourlanguage.com](https://notyourlanguage.substack.com/) (or create your own) and the extension checks your work.
 
 ## Anatomy of an exercise
 
-Everything important lives in `.pi/ai-lings/` inside your project root. Here's the full file set:
+Exercise confiruation live in `.pi/ai-lings/` inside your project root. Here's the full file set:
 
 | File | Purpose | Required?
 | --- | --- | ---
@@ -13,12 +13,14 @@ Everything important lives in `.pi/ai-lings/` inside your project root. Here's t
 | `EVALUATION.yaml` | Checklist of objectives the evaluator tracks | No
 | `EXPLANATION.md` | The exercise briefing, shown with `/explain` | No
 
-Create only the files you need. A minimal exercise is `config.json` + `RULES.md` — the other two are optional but make the experience much better.
+Create only the files you need. A minimal exercise is `config.json` + `RULES.md`. The other two are optional.
 
 ## Install
 
 ```sh
 pi install /path/to/pi-ai-lings
+# or direct from npm
+pi install npm:pi-ai-lings
 ```
 
 ## config.json
@@ -35,9 +37,9 @@ A plain JSON file at `.pi/ai-lings/config.json` that controls everything:
 | Field | What it does
 |---|---
 | `enabled` | `true` = check prompts against rules; `false` = disable the prompt gate, evaluations widget stays display-only
-| `model` | Pi model slug (`provider/model-id`) — the model that evaluates your prompts against `RULES.md` and runs `/al-eval`
+| `model` | Pi model slug (`provider/model-id`). The model that evaluates your prompts against `RULES.md` and runs `/al-eval`
 
-Remove `config.json` entirely to disable the extension. Set `"enabled": false` to keep the widget visible without blocking prompts — useful when you want to see objectives but aren't ready for strict rule enforcement.
+Remove `config.json` entirely to disable the extension. Set `"enabled": false` to keep the widget visible without blocking prompts. Useful when you want to see objectives but aren't ready for strict rule enforcement.
 
 > **Model slugs**: the format is `provider/model-id`. If the model ID itself contains a slash, only the first slash separates the provider. For example `openai/gpt-4o` or `anthropic/claude-sonnet-4-20250514`.
 
@@ -64,7 +66,7 @@ This is the gate. Every prompt you send to Pi is intercepted and checked against
 3. The user must not ask to skip the exercise.
 ```
 
-Rules work best when they describe behavior the evaluator can detect in a single prompt — "did they ask for the finished code" is easy; "have they practiced enough" is not.
+Rules work best when they describe behavior the evaluator can detect in a single prompt. "Did they ask for the finished code" is easy; "have they practiced enough" is not.
 
 > **Security note**: The evaluator treats both `RULES.md` and your prompt as untrusted data. The rules can't trick the evaluator into bypassing itself.
 
@@ -104,13 +106,13 @@ The widget updates in place:
 
 ```
 ✓  Correct AGENTS.md
-○  Has a working build  — package.json has no build script
+○  Has a working build  (package.json has no build script)
 ```
 
 ### When evaluation runs
 
 - **Session start**: widget appears with all objectives empty (○).
-- **`/al-eval`**: run it anytime for a fresh assessment — especially useful after you've made progress.
+- **`/al-eval`**: run it anytime for a fresh assessment. Especially useful after you've made progress.
 - **After every agent turn**: the evaluator re-checks automatically when the agent settles (only if `config.json` is present and enabled).
 
 ## EXPLANATION.md
@@ -138,11 +140,11 @@ Here's the end-to-end flow for creating one. Create each file in `.pi/ai-lings/`
 
 ### 1. Write the briefing
 
-**`EXPLANATION.md`** — what the learner sees. Include enough context that `/explain` is useful on its own.
+**`EXPLANATION.md`**. The exercise briefing. Include enough context that `/explain` is useful on its own.
 
 ### 2. Write the rules
 
-**`RULES.md`** — what the learner is not allowed to do. The gate blocks prompts that violate these. Start with the obvious ones:
+**`RULES.md`**. The gate blocks prompts that violate these. Start with the obvious ones:
 
 ```markdown
 # Rules
@@ -156,7 +158,7 @@ Tighten or loosen based on how your learners actually behave. The evaluator is s
 
 ### 3. Write the checklist
 
-**`EVALUATION.yaml`** — how success is measured. Each objective should be independently verifiable by an agent that can read files and grep:
+**`EVALUATION.yaml`**. Each objective should be independently verifiable by an agent that can read files and grep:
 
 ```yaml
 exercise_name: FizzBuzz
@@ -178,7 +180,7 @@ exercise_name: FizzBuzz
       - package.json has no dependencies beyond what was provided
 ```
 
-Keep criteria concrete — the evaluator can grep for function names, check files, parse JSON. It can't judge "code is readable" or "follows best practices" reliably.
+Keep criteria concrete. The evaluator can grep for function names, check files, parse JSON. It can't judge "code is readable" or "follows best practices" reliably.
 
 ### 4. Enable the extension
 
@@ -191,15 +193,15 @@ Keep criteria concrete — the evaluator can grep for function names, check file
 }
 ```
 
-Pick a model you trust to evaluate rules fairly. Small/cheap models sometimes miss subtle violations — if prompts slip through when they shouldn't, upgrade the model.
+Pick a model you trust to evaluate rules fairly. Small/cheap models sometimes miss subtle violations. If prompts slip through when they shouldn't, upgrade the model.
 
 ### 5. Test it
 
 - Start a Pi session in the exercise project.
-- Run `/explain` — the briefing should appear.
-- Send a prompt that breaks a rule — it should be blocked with a reason.
-- Send a valid prompt — it should pass through.
-- Run `/al-eval` — the widget should show objectives matching your repo state.
+- Run `/explain`. The briefing should appear.
+- Send a prompt that breaks a rule. It should be blocked with a reason.
+- Send a valid prompt. It should pass through.
+- Run `/al-eval`. The widget should show objectives matching your repo state.
 
 ## Tips
 
@@ -221,7 +223,7 @@ git diff --check              # no whitespace errors
 
 ## Scope
 
-This extension provides only the prompt gate and evaluation machinery. Exercise instructions and answers live at [notyourlanguage.com](https://notyourlanguage.substack.com/) — this project should not duplicate them without a specific reason.
+This extension provides only the prompt gate and evaluation machinery. Exercise instructions live at [notyourlanguage.com](https://notyourlanguage.substack.com/). This project should not duplicate them without a specific reason.
 
 ## License
 
