@@ -10,6 +10,7 @@
     "url": "https://github.com/DnOberon/pi-ai-lings.git"
   },
   "author": "John Darrington",
+  "license": "MIT",
   "type": "module",
   "main": "index.ts",
   "engines": {
