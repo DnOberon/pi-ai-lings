@@ -86,6 +86,62 @@ test("ignores disabled or missing project config", () => {
   assert.equal(readProjectConfig(cwd), null);
 });
 
+test("displays evaluation criteria without running when disabled", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
+  const directory = path.join(cwd, ".pi", "ai-lings");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(
+    path.join(directory, "config.json"),
+    JSON.stringify({ enabled: false, model: "test/model" }),
+  );
+  fs.writeFileSync(
+    path.join(directory, "EVALUATION.yaml"),
+    "evaluations:\n  - name: Ready\n    show: true\n    criteria: [Works]\n",
+  );
+
+  const handlers = new Map<string, (event: any, ctx: any) => Promise<void>>();
+  const widgetCalls: Array<{ id: string; items?: any }> = [];
+  const notifications: string[] = [];
+  const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
+  const pi = {
+    on: (event: string, cb: (event: any, ctx: any) => Promise<void>) =>
+      handlers.set(event, cb),
+    registerCommand: (
+      name: string,
+      opts: { handler: (args: string, ctx: any) => Promise<void> },
+    ) => commands.set(name, opts.handler),
+  };
+  extension(pi as any);
+  const ctx = {
+    cwd,
+    ui: {
+      notify: (message: string) => notifications.push(message),
+      setWidget: (id: string, items?: any) => widgetCalls.push({ id, items }),
+    },
+    modelRegistry: {
+      streamSimple: () => {
+        throw new Error("must not evaluate when disabled");
+      },
+    },
+  };
+
+  const startHandler = handlers.get("session_start");
+  assert.ok(startHandler);
+  await startHandler({}, ctx);
+  const settledHandler = handlers.get("agent_settled");
+  assert.ok(settledHandler);
+  await settledHandler({}, ctx);
+  const command = commands.get("al-eval");
+  assert.ok(command);
+  await command("", ctx);
+  assert.ok(
+    widgetCalls.some((call) =>
+      call.items?.some((item: string) => item.includes("Evaluation Criteria:")),
+    ),
+  );
+  assert.deepEqual(notifications, []);
+});
+
 test("parses strict evaluator verdicts", () => {
   assert.deepEqual(
     parseVerdict({

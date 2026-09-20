@@ -18,32 +18,37 @@ const EVALUATION_TIMEOUT_MS = 5 * 60_000;
 const EVALUATION_OUTPUT_LIMIT = 1_000_000;
 
 type ProjectConfig = { model: string };
+type ProjectConfigFile = { enabled?: unknown; model?: unknown };
 type Verdict = { allow: boolean; reason: string };
 type Message = { content?: Array<{ type: string; text?: string }> };
 type Evaluation = { name: string; show: boolean; criteria: string[] };
 type EvaluationDocument = { exerciseName?: string; evaluations: Evaluation[] };
 type EvaluationStatus = { complete: boolean; reason: string };
 
-function readProjectConfig(cwd: string): ProjectConfig | null {
+function readProjectConfigFile(cwd: string): ProjectConfigFile | null {
   const filename = path.join(cwd, ...CONFIG_PATH);
   try {
-    const config = JSON.parse(fs.readFileSync(filename, "utf8")) as {
-      enabled?: boolean;
-      model?: unknown;
-      evaluationIntervalMs?: unknown;
-    };
-    if (
-      config?.enabled !== true ||
-      typeof config.model !== "string" ||
-      !config.model.trim()
-    ) {
-      return null;
-    }
-    return { model: config.model.trim() };
+    return JSON.parse(fs.readFileSync(filename, "utf8")) as ProjectConfigFile;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw new Error(`Could not read ${filename}: ${(error as Error).message}`);
   }
+}
+
+function readProjectConfig(cwd: string): ProjectConfig | null {
+  const config = readProjectConfigFile(cwd);
+  if (
+    config?.enabled !== true ||
+    typeof config.model !== "string" ||
+    !config.model.trim()
+  ) {
+    return null;
+  }
+  return { model: config.model.trim() };
+}
+
+function isEvaluationDisplayOnly(cwd: string): boolean {
+  return readProjectConfigFile(cwd)?.enabled === false;
 }
 
 function readRules(cwd: string): string {
@@ -483,6 +488,12 @@ export default function extension(pi: ExtensionAPI): void {
       const prompt = args || lastPrompt;
       const config = readProjectConfig(ctx.cwd);
       if (!config) {
+        if (isEvaluationDisplayOnly(ctx.cwd)) {
+          const document = readEvaluations(ctx.cwd);
+          if (document) renderEvaluations(ctx, document, statuses);
+          else ctx.ui.notify("No EVALUATION.yaml found", "warning");
+          return;
+        }
         ctx.ui.notify("ai-lings is not enabled (no config.json)", "warning");
         return;
       }

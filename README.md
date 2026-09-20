@@ -51,7 +51,7 @@ Create `.pi/ai-lings/EXPLANATION.md` to document the current exercise. Run `/exp
 
 `RULES.md` is ordinary Markdown containing the rules the evaluator must apply. A prompt is allowed only when the evaluator returns valid JSON with `allow: true`. Missing rules, unknown models, evaluator errors, and malformed evaluator responses reject the prompt rather than bypassing the check.
 
-Disable the check for a project with `"enabled": false` or by removing `config.json`.
+Disable the prompt check and evaluator for a project with `"enabled": false`; the Evaluation Criteria widget remains display-only. Removing `config.json` disables the extension entirely.
 
 ## Development
 
