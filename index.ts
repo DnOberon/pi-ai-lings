@@ -391,6 +391,21 @@ function renderEvaluations(
   );
 }
 
+function renderEvaluationStatus(ctx: ExtensionContext, running: boolean): void {
+  ctx.ui.setWidget(
+    "ai-lings-eval-status",
+    running
+      ? [
+          ctx.ui.theme.bg(
+            "toolPendingBg",
+            ctx.ui.theme.bold(" Running evaluations… "),
+          ),
+        ]
+      : undefined,
+    { placement: "aboveEditor" },
+  );
+}
+
 function notify(ctx: ExtensionContext, message: string): void {
   ctx.ui.notify(message, "warning");
 }
@@ -409,6 +424,23 @@ export default function extension(pi: ExtensionAPI): void {
     lastPrompt = event.text;
   });
 
+  pi.on("agent_settled", async (_event, ctx) => {
+    const config = readProjectConfig(ctx.cwd);
+    if (!config) return;
+    const document = readEvaluations(ctx.cwd);
+    if (!document) return;
+
+    renderEvaluationStatus(ctx, true);
+    try {
+      const result = await evaluateDocument(ctx, document, "", config.model);
+      if (result) {
+        statuses = result;
+        renderEvaluations(ctx, document, statuses);
+      }
+    } finally {
+      renderEvaluationStatus(ctx, false);
+    }
+  });
   pi.on("input", async (event, ctx): Promise<InputEventResult> => {
     let config: ProjectConfig | null;
     try {
@@ -459,7 +491,7 @@ export default function extension(pi: ExtensionAPI): void {
         ctx.ui.notify("No EVALUATION.yaml found", "warning");
         return;
       }
-      ctx.ui.setStatus("ai-lings-eval", "Running evaluations…");
+      renderEvaluationStatus(ctx, true);
       try {
         const result = await evaluateDocument(
           ctx,
@@ -475,7 +507,7 @@ export default function extension(pi: ExtensionAPI): void {
         renderEvaluations(ctx, document, statuses);
         ctx.ui.notify("Evaluations updated", "info");
       } finally {
-        ctx.ui.setStatus("ai-lings-eval", undefined);
+        renderEvaluationStatus(ctx, false);
       }
     },
   });
@@ -487,5 +519,6 @@ export {
   readEvaluations,
   readExplanation,
   readProjectConfig,
+  renderEvaluationStatus,
   splitModelSlug,
 };

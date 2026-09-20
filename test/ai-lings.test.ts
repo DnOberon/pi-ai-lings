@@ -6,6 +6,7 @@ import extension, {
   readEvaluations,
   readExplanation,
   readProjectConfig,
+  renderEvaluationStatus,
   splitModelSlug,
 } from "../index.ts";
 import fs from "node:fs";
@@ -217,15 +218,42 @@ test("runs evaluations on session start and renders widget", async () => {
   );
 });
 
+test("renders running evaluations as a highlighted banner", () => {
+  const calls: Array<{ id: string; items?: any; options?: any }> = [];
+  const ctx = {
+    ui: {
+      theme: {
+        bold: (text: string) => `<bold>${text}</bold>`,
+        bg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+      },
+      setWidget: (id: string, items?: any, options?: any) =>
+        calls.push({ id, items, options }),
+    },
+  };
+
+  renderEvaluationStatus(ctx as any, true);
+  assert.deepEqual(calls[0], {
+    id: "ai-lings-eval-status",
+    items: [
+      "<toolPendingBg><bold> Running evaluations… </bold></toolPendingBg>",
+    ],
+    options: { placement: "aboveEditor" },
+  });
+
+  renderEvaluationStatus(ctx as any, false);
+  assert.deepEqual(calls[1], {
+    id: "ai-lings-eval-status",
+    items: undefined,
+    options: { placement: "aboveEditor" },
+  });
+});
+
 test("explain displays EXPLANATION.md", async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
   const directory = path.join(cwd, ".pi", "ai-lings");
   fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(path.join(directory, "EXPLANATION.md"), "# Explanation\n");
-  const commands = new Map<
-    string,
-    (args: string, ctx: any) => Promise<void>
-  >();
+  const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
   const notifications: Array<{ message: string; type: string }> = [];
   const pi = {
     on: () => {},
