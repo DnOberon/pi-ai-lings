@@ -4,16 +4,15 @@ A [Pi](https://github.com/earendil-works/pi-coding-agent) extension that turns g
 
 ## Anatomy of an exercise
 
-Exercise confiruation live in `.pi/ai-lings/` inside your project root. Here's the full file set:
+Exercise configuration lives in `.pi/ai-lings/` inside your project root. Here's the full file set:
 
 | File | Purpose | Required?
 | --- | --- | ---
-| `config.json` | Enable the extension and pick the evaluator model | Yes
-| `RULES.md` | Rules the evaluator checks before every prompt you send | Yes (with config)
+| `RULES.md` | Rules the evaluator checks before every prompt you send | Yes (when enabled)
 | `EVALUATION.yaml` | Checklist of objectives the evaluator tracks | No
 | `EXPLANATION.md` | The exercise briefing, shown with `/explain` | No
 
-Create only the files you need. A minimal exercise is `config.json` + `RULES.md`. The other two are optional.
+Create only the files you need. A minimal exercise is `RULES.md`; enable its directory with `/al-enable`. The other files are optional.
 
 ## Install
 
@@ -23,23 +22,24 @@ pi install /path/to/pi-ai-lings
 pi install npm:pi-ai-lings
 ```
 
-## config.json
+## Enabling directories and choosing a model
 
-A plain JSON file at `.pi/ai-lings/config.json` that controls everything:
+The extension-root config at `~/.pi/agent/extensions/ai-lings/config.json` stores enabled directories and the evaluator model:
 
 ```json
 {
-  "enabled": true,
+  "directories": ["/home/me/exercises"],
   "model": "anthropic/claude-sonnet-4-20250514"
 }
 ```
 
-| Field | What it does
-|---|---
-| `enabled` | `true` = check prompts against rules; `false` = disable the prompt gate, evaluations widget stays display-only
-| `model` | Pi model slug (`provider/model-id`). The model that evaluates your prompts against `RULES.md` and runs `/al-eval`
+Use these commands from Pi:
 
-Remove `config.json` entirely to disable the extension. Set `"enabled": false` to keep the widget visible without blocking prompts. Useful when you want to see objectives but aren't ready for strict rule enforcement.
+- `/al-enable [directory]` adds a directory (or the current directory) and its children.
+- `/al-disable [directory]` removes a directory (or the current directory).
+- `/al-model [provider/model]` records the model used for prompt checks and `/al-eval`. Leave empty to capture the current Pi session model automatically.
+
+A project is checked only when its current directory is inside an enabled directory. The existing `.pi/ai-lings/config.json` with `"enabled": true` remains supported for per-project configuration; its model is used as a fallback when the user-level config does not enable that directory. Set its `"enabled"` to `false` for a display-only project.
 
 > **Model slugs**: the format is `provider/model-id`. If the model ID itself contains a slash, only the first slash separates the provider. For example `openai/gpt-4o` or `anthropic/claude-sonnet-4-20250514`.
 
@@ -113,7 +113,7 @@ The widget updates in place:
 
 - **Session start**: widget appears with all objectives empty (○).
 - **`/al-eval`**: run it anytime for a fresh assessment. Especially useful after you've made progress.
-- **After every agent turn**: the evaluator re-checks automatically when the agent settles (only if `config.json` is present and enabled).
+- **After every agent turn**: the evaluator re-checks automatically when the agent settles (only if the directory is enabled).
 
 ## EXPLANATION.md
 
@@ -162,6 +162,7 @@ Tighten or loosen based on how your learners actually behave. The evaluator is s
 
 ```yaml
 exercise_name: FizzBuzz
+evaluations:
   - name: Function exists
     show: true
     meet_all: true
@@ -184,14 +185,7 @@ Keep criteria concrete. The evaluator can grep for function names, check files, 
 
 ### 4. Enable the extension
 
-**`config.json`**:
-
-```json
-{
-  "enabled": true,
-  "model": "anthropic/claude-sonnet-4-20250514"
-}
-```
+From the exercise directory, run `/al-enable` and set the evaluator with `/al-model provider/model`. These settings are stored in `~/.pi/agent/extensions/ai-lings/config.json`, so they apply to the chosen directory tree without adding user-specific settings to the exercise repository.
 
 Pick a model you trust to evaluate rules fairly. Small/cheap models sometimes miss subtle violations. If prompts slip through when they shouldn't, upgrade the model.
 

@@ -13,12 +13,20 @@ const CONFIG_PATH = [".pi", "ai-lings", "config.json"];
 const RULES_PATH = [".pi", "ai-lings", "RULES.md"];
 const EVALUATION_PATH = [".pi", "ai-lings", "EVALUATION.yaml"];
 const EXPLANATION_PATH = [".pi", "ai-lings", "EXPLANATION.md"];
+const USER_CONFIG_PATH = [
+  ".pi",
+  "agent",
+  "extensions",
+  "ai-lings",
+  "config.json",
+];
 // ponytail: single timeout/cap for the evaluator subprocess; tune if runs grow
 const EVALUATION_TIMEOUT_MS = 5 * 60_000;
 const EVALUATION_OUTPUT_LIMIT = 1_000_000;
 
 type ProjectConfig = { model: string };
 type ProjectConfigFile = { enabled?: unknown; model?: unknown };
+type UserConfig = { directories: string[]; model?: string };
 type Verdict = { allow: boolean; reason: string };
 type Message = { content?: Array<{ type: string; text?: string }> };
 type Evaluation = {
@@ -40,16 +48,93 @@ function readProjectConfigFile(cwd: string): ProjectConfigFile | null {
   }
 }
 
-function readProjectConfig(cwd: string): ProjectConfig | null {
-  const config = readProjectConfigFile(cwd);
-  if (
-    config?.enabled !== true ||
-    typeof config.model !== "string" ||
-    !config.model.trim()
-  ) {
-    return null;
+function userConfigFilename(): string {
+  return path.join(os.homedir(), ...USER_CONFIG_PATH);
+}
+
+function readUserConfig(filename = userConfigFilename()): UserConfig {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(filename, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { directories: [] };
+    }
+    throw new Error(`Could not read ${filename}: ${(error as Error).message}`);
   }
-  return { model: config.model.trim() };
+  if (!raw || typeof raw !== "object") {
+    throw new Error(`Could not read ${filename}: config must be an object`);
+  }
+  const config = raw as { directories?: unknown; model?: unknown };
+  if (
+    config.directories !== undefined &&
+    (!Array.isArray(config.directories) ||
+      config.directories.some(
+        (directory) => typeof directory !== "string" || !directory.trim(),
+      ))
+  ) {
+    throw new Error(
+      `Could not read ${filename}: directories must be a list of paths`,
+    );
+  }
+  if (
+    config.model !== undefined &&
+    (typeof config.model !== "string" || !config.model.trim())
+  ) {
+    throw new Error(
+      `Could not read ${filename}: model must be a non-empty string`,
+    );
+  }
+  return {
+    directories:
+      (config.directories as string[] | undefined)?.map((directory) =>
+        path.resolve(path.dirname(filename), directory),
+      ) ?? [],
+    model: typeof config.model === "string" ? config.model.trim() : undefined,
+  };
+}
+
+function writeUserConfig(
+  config: UserConfig,
+  filename = userConfigFilename(),
+): void {
+  fs.mkdirSync(path.dirname(filename), { recursive: true });
+  fs.writeFileSync(filename, `${JSON.stringify(config, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+}
+
+function isDirectoryEnabled(
+  cwd: string,
+  filename = userConfigFilename(),
+): boolean {
+  const directory = path.resolve(cwd);
+  return readUserConfig(filename).directories.some((enabledDirectory) => {
+    const relative = path.relative(enabledDirectory, directory);
+    return (
+      relative === "" ||
+      (!relative.startsWith("..") && !path.isAbsolute(relative))
+    );
+  });
+}
+
+function readProjectConfig(cwd: string): ProjectConfig | null {
+  const projectConfig = readProjectConfigFile(cwd);
+  if (projectConfig?.enabled === false) return null;
+
+  const userConfig = readUserConfig();
+  if (isDirectoryEnabled(cwd) && userConfig.model) {
+    return { model: userConfig.model };
+  }
+  if (
+    projectConfig?.enabled === true &&
+    typeof projectConfig.model === "string" &&
+    projectConfig.model.trim()
+  ) {
+    return { model: projectConfig.model.trim() };
+  }
+  return null;
 }
 
 function isEvaluationDisplayOnly(cwd: string): boolean {
@@ -391,10 +476,13 @@ function renderEvaluations(
     ctx.ui.setWidget("ai-lings-evaluations", undefined);
     return;
   }
+  const header = document?.exerciseName
+    ? `Evaluation Criteria: ${document.exerciseName}`
+    : "Evaluation Criteria:";
   ctx.ui.setWidget(
     "ai-lings-evaluations",
     [
-      "Evaluation Criteria:",
+      header,
       ...evaluations.map((evaluation) => {
         const status = statuses.get(evaluation.name);
         const showReason =
@@ -430,9 +518,12 @@ export default function extension(pi: ExtensionAPI): void {
   let statuses = new Map<string, EvaluationStatus>();
 
   pi.on("session_start", (_event, ctx) => {
-    // Show an initial empty widget so the placeholder exists
-    const document = readEvaluations(ctx.cwd);
-    if (document) renderEvaluations(ctx, document, new Map());
+    try {
+      const document = readEvaluations(ctx.cwd);
+      if (document) renderEvaluations(ctx, document, new Map());
+    } catch {
+      // malformed EVALUATION.yaml — skip initial widget
+    }
   });
 
   pi.on("input", (event, _ctx) => {
@@ -440,11 +531,17 @@ export default function extension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    const config = readProjectConfig(ctx.cwd);
-    if (!config) return;
-    const document = readEvaluations(ctx.cwd);
-    if (!document) return;
-
+    let config: ProjectConfig | null;
+    let document: EvaluationDocument | null;
+    try {
+      config = readProjectConfig(ctx.cwd);
+      if (!config) return;
+      document = readEvaluations(ctx.cwd);
+      if (!document) return;
+    } catch (error) {
+      notify(ctx, (error as Error).message);
+      return;
+    }
     renderEvaluationStatus(ctx, true);
     try {
       const result = await evaluateDocument(ctx, document, "", config.model);
@@ -479,6 +576,70 @@ export default function extension(pi: ExtensionAPI): void {
       notify(ctx, `Prompt rejected by ai-lings: ${(error as Error).message}`);
       return { action: "handled" };
     }
+  });
+
+  pi.registerCommand("al-enable", {
+    description:
+      "Enable ai-lings for a directory (defaults to the current directory)",
+    handler: async (args, ctx) => {
+      try {
+        const directory = path.resolve(ctx.cwd, args.trim() || ".");
+        const config = readUserConfig();
+        if (!config.directories.includes(directory)) {
+          config.directories.push(directory);
+          writeUserConfig(config);
+        }
+        ctx.ui.notify(`ai-lings enabled for ${directory}`, "info");
+      } catch (error) {
+        ctx.ui.notify((error as Error).message, "warning");
+      }
+    },
+  });
+
+  pi.registerCommand("al-disable", {
+    description:
+      "Disable ai-lings for a directory (defaults to the current directory)",
+    handler: async (args, ctx) => {
+      try {
+        const directory = path.resolve(ctx.cwd, args.trim() || ".");
+        const config = readUserConfig();
+        config.directories = config.directories.filter(
+          (item) => item !== directory,
+        );
+        writeUserConfig(config);
+        ctx.ui.notify(`ai-lings disabled for ${directory}`, "info");
+      } catch (error) {
+        ctx.ui.notify((error as Error).message, "warning");
+      }
+    },
+  });
+
+  pi.registerCommand("al-model", {
+    description: "Set the ai-lings evaluator model in the user config",
+    handler: async (args, ctx) => {
+      try {
+        let model = args.trim();
+        if (!model) {
+          const currentModel = ctx.model;
+          if (currentModel)
+            model = `${currentModel.provider}/${currentModel.id}`;
+          else {
+            ctx.ui.notify(
+              "Usage: /al-model provider/model (or no args to capture the current model)",
+              "warning",
+            );
+            return;
+          }
+        }
+        splitModelSlug(model);
+        const config = readUserConfig();
+        config.model = model;
+        writeUserConfig(config);
+        ctx.ui.notify(`ai-lings model set to ${model}`, "info");
+      } catch (error) {
+        ctx.ui.notify((error as Error).message, "warning");
+      }
+    },
   });
 
   pi.registerCommand("explain", {
@@ -535,11 +696,14 @@ export default function extension(pi: ExtensionAPI): void {
 }
 
 export {
+  isDirectoryEnabled,
   parseEvaluationResults,
   parseVerdict,
   readEvaluations,
   readExplanation,
   readProjectConfig,
+  readUserConfig,
   renderEvaluationStatus,
   splitModelSlug,
+  writeUserConfig,
 };

@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import extension, {
+  isDirectoryEnabled,
   parseEvaluationResults,
   parseVerdict,
   readEvaluations,
   readExplanation,
   readProjectConfig,
+  readUserConfig,
   renderEvaluationStatus,
   splitModelSlug,
+  writeUserConfig,
 } from "../index.ts";
 import fs from "node:fs";
 import os from "node:os";
@@ -23,6 +26,18 @@ test("reads enabled project config", () => {
   assert.deepEqual(readProjectConfig(cwd), {
     model: "openai/gpt-4o-mini",
   });
+});
+
+test("enables a directory and its children from the user config", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
+  const config = path.join(root, "config.json");
+  writeUserConfig({ directories: [root], model: "test/model" }, config);
+  assert.deepEqual(readUserConfig(config), {
+    directories: [root],
+    model: "test/model",
+  });
+  assert.equal(isDirectoryEnabled(path.join(root, "exercise"), config), true);
+  assert.equal(isDirectoryEnabled(`${root}-sibling`, config), false);
 });
 
 test("reads evaluationIntervalMs when set (deprecated config)", () => {
@@ -398,6 +413,63 @@ test("al-eval warns when config is missing", async () => {
     notifyLog.some((n) => n.includes("not enabled")),
     "warns when not configured",
   );
+});
+
+test("commands persist enabled directories and the evaluator model", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-home-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const commands = new Map<
+      string,
+      (args: string, ctx: any) => Promise<void>
+    >();
+    const notifications: string[] = [];
+    const pi = {
+      on: () => {},
+      registerCommand: (
+        name: string,
+        opts: { handler: (args: string, ctx: any) => Promise<void> },
+      ) => commands.set(name, opts.handler),
+    };
+    extension(pi as any);
+    const ctx = {
+      cwd,
+      ui: { notify: (message: string) => notifications.push(message) },
+    };
+
+    await commands.get("al-enable")!("", ctx);
+    await commands.get("al-model")!("test/model", ctx);
+
+    const config = readUserConfig(
+      path.join(home, ".pi", "agent", "extensions", "ai-lings", "config.json"),
+    );
+    assert.deepEqual(config, { directories: [cwd], model: "test/model" });
+    assert.equal(readProjectConfig(cwd)?.model, "test/model");
+
+    await commands.get("al-disable")!("", ctx);
+    assert.deepEqual(
+      readUserConfig(
+        path.join(
+          home,
+          ".pi",
+          "agent",
+          "extensions",
+          "ai-lings",
+          "config.json",
+        ),
+      ),
+      {
+        directories: [],
+        model: "test/model",
+      },
+    );
+    assert.equal(notifications.length, 3);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
 });
 
 test("al-eval warns when EVALUATION.yaml is missing", async () => {
