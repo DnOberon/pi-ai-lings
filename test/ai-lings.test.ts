@@ -4,6 +4,7 @@ import extension, {
   parseEvaluationResults,
   parseVerdict,
   readEvaluations,
+  readExplanation,
   readProjectConfig,
   splitModelSlug,
 } from "../index.ts";
@@ -31,6 +32,14 @@ test("reads evaluationIntervalMs when set (deprecated config)", () => {
     JSON.stringify({ enabled: true, model: "m/m", evaluationIntervalMs: 9999 }),
   );
   assert.deepEqual(readProjectConfig(cwd), { model: "m/m" });
+});
+
+test("reads EXPLANATION.md", () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
+  const directory = path.join(cwd, ".pi", "ai-lings");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "EXPLANATION.md"), "# How it works\n");
+  assert.equal(readExplanation(cwd), "# How it works\n");
 });
 
 test("reads evaluation objectives and their display setting", () => {
@@ -206,6 +215,43 @@ test("runs evaluations on session start and renders widget", async () => {
     widget.items?.some((i: string) => i.includes("○")),
     "initial shows pending",
   );
+});
+
+test("explain displays EXPLANATION.md", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
+  const directory = path.join(cwd, ".pi", "ai-lings");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "EXPLANATION.md"), "# Explanation\n");
+  const commands = new Map<
+    string,
+    (args: string, ctx: any) => Promise<void>
+  >();
+  const notifications: Array<{ message: string; type: string }> = [];
+  const pi = {
+    on: () => {},
+    registerCommand: (
+      name: string,
+      opts: {
+        description: string;
+        handler: (args: string, ctx: any) => Promise<void>;
+      },
+    ) => {
+      commands.set(name, opts.handler);
+    },
+  };
+  extension(pi as any);
+  const cmd = commands.get("explain");
+  assert.ok(cmd);
+  await cmd("", {
+    cwd,
+    ui: {
+      notify: (message: string, type: string) =>
+        notifications.push({ message, type }),
+    },
+  });
+  assert.deepEqual(notifications, [
+    { message: "# Explanation\n", type: "info" },
+  ]);
 });
 
 test("al-eval warns when config is missing", async () => {

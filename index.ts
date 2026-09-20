@@ -12,6 +12,7 @@ import path from "node:path";
 const CONFIG_PATH = [".pi", "ai-lings", "config.json"];
 const RULES_PATH = [".pi", "ai-lings", "RULES.md"];
 const EVALUATION_PATH = [".pi", "ai-lings", "EVALUATION.yaml"];
+const EXPLANATION_PATH = [".pi", "ai-lings", "EXPLANATION.md"];
 // ponytail: single timeout/cap for the evaluator subprocess; tune if runs grow
 const EVALUATION_TIMEOUT_MS = 5 * 60_000;
 const EVALUATION_OUTPUT_LIMIT = 1_000_000;
@@ -52,6 +53,20 @@ function readRules(cwd: string): string {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(`Rules file not found: ${path.join(...RULES_PATH)}`);
+    }
+    throw new Error(`Could not read ${filename}: ${(error as Error).message}`);
+  }
+}
+
+function readExplanation(cwd: string): string {
+  const filename = path.join(cwd, ...EXPLANATION_PATH);
+  try {
+    return fs.readFileSync(filename, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(
+        `Explanation file not found: ${path.join(...EXPLANATION_PATH)}`,
+      );
     }
     throw new Error(`Could not read ${filename}: ${(error as Error).message}`);
   }
@@ -363,12 +378,15 @@ function renderEvaluations(
   }
   ctx.ui.setWidget(
     "ai-lings-evaluations",
-    evaluations.map((evaluation) => {
-      const status = statuses.get(evaluation.name);
-      const showReason =
-        evaluation.show && status && !status.complete && status.reason;
-      return `${status?.complete ? "✓" : "○"} ${evaluation.name}${showReason ? ` — ${status.reason}` : ""}`;
-    }),
+    [
+      "Evaluation Criteria:",
+      ...evaluations.map((evaluation) => {
+        const status = statuses.get(evaluation.name);
+        const showReason =
+          evaluation.show && status && !status.complete && status.reason;
+        return `${status?.complete ? "✓" : "○"} ${evaluation.name}${showReason ? ` — ${status.reason}` : ""}`;
+      }),
+    ],
     { placement: "aboveEditor" },
   );
 }
@@ -416,6 +434,17 @@ export default function extension(pi: ExtensionAPI): void {
     }
   });
 
+  pi.registerCommand("explain", {
+    description: "Show the exercise explanation from EXPLANATION.md",
+    handler: async (_args, ctx) => {
+      try {
+        ctx.ui.notify(readExplanation(ctx.cwd), "info");
+      } catch (error) {
+        ctx.ui.notify((error as Error).message, "warning");
+      }
+    },
+  });
+
   pi.registerCommand("al-eval", {
     description: "Run exercise evaluations in EVALUATION.yaml",
     handler: async (args, ctx) => {
@@ -456,6 +485,7 @@ export {
   parseEvaluationResults,
   parseVerdict,
   readEvaluations,
+  readExplanation,
   readProjectConfig,
   splitModelSlug,
 };

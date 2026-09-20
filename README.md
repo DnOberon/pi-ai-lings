@@ -45,6 +45,10 @@ Run `/al-eval` to evaluate all objectives against the current prompt and reposit
 
 On session start the widget appears empty (all ○). Run `/al-eval` whenever you want a fresh assessment. The evaluator receives the evaluation document, repository facts, and the last prompt sent to the agent.
 
+### EXPLANATION.md
+
+Create `.pi/ai-lings/EXPLANATION.md` to document the current exercise. Run `/explain` to display it in the Pi window.
+
 `RULES.md` is ordinary Markdown containing the rules the evaluator must apply. A prompt is allowed only when the evaluator returns valid JSON with `allow: true`. Missing rules, unknown models, evaluator errors, and malformed evaluator responses reject the prompt rather than bypassing the check.
 
 Disable the check for a project with `"enabled": false` or by removing `config.json`.
