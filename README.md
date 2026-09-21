@@ -1,6 +1,6 @@
 # pi-ai-lings
 
-A [Pi](https://github.com/earendil-works/pi-coding-agent) extension that turns guided programming exercises into checkable, rules-enforced sessions. Work through exercises introduced at [notyourlanguage.com](https://notyourlanguage.substack.com/) (or create your own) and the extension checks your work.
+A [Pi](https://github.com/earendil-works/pi-coding-agent) extension that turns guided programming exercises into checkable, rules-enforced sessions. Work through exercises introduced at [notyourlanguage.com](https://notyourlanguage.com/AI-Lings/Coming+Soon!) (or create your own) and the extension checks your work.
 
 ## Anatomy of an exercise
 
@@ -181,7 +181,7 @@ evaluations:
       - package.json has no dependencies beyond what was provided
 ```
 
-Keep criteria concrete. The evaluator can grep for function names, check files, parse JSON. It can't judge "code is readable" or "follows best practices" reliably.
+Keep criteria concrete. The evaluation is a work in progress and is currently very non-deterministic.
 
 ### 4. Enable the extension
 
@@ -217,7 +217,7 @@ git diff --check              # no whitespace errors
 
 ## Scope
 
-This extension provides only the prompt gate and evaluation machinery. Exercise instructions live at [notyourlanguage.com](https://notyourlanguage.substack.com/). This project should not duplicate them without a specific reason.
+This extension provides only the prompt gate and evaluation machinery. Exercise instructions live at [notyourlanguage.com](https://notyourlanguage.com/AI-Lings/Coming+Soon!). This project should not duplicate them without a specific reason.
 
 ## License
 
