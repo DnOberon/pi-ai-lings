@@ -72,7 +72,7 @@ Rules work best when they describe behavior the evaluator can detect in a single
 
 ## EVALUATION.yaml
 
-A YAML checklist of objectives that updates live in the Pi widget. The evaluator agent (a fresh `pi` subprocess with read-only tools) examines your repository and marks each item complete or not.
+A YAML checklist of objectives used by the evaluator agent (a fresh `pi` subprocess with read-only tools) to examine your repository and mark each item complete or not. When ai-lings is enabled for the current directory, the exercise status appears in the powerline as `Complete` or `Incomplete`.
 
 ```yaml
 exercise_name: Test Exercise
@@ -102,13 +102,6 @@ The evaluator spawns a new `pi` subprocess with `--tools read,grep,find,ls` and 
 [{"name": "Correct AGENTS.md", "complete": false, "reason": "No AGENTS.md found"}]
 ```
 
-The widget updates in place:
-
-```
-✓  Correct AGENTS.md
-○  Has a working build  (package.json has no build script)
-```
-
 ### Evaluation state for Jev
 
 `/al-state` builds a bounded, JSON-serializable state artifact for future Jev/OpenRouter Decisions requests. Its stable shape is:
@@ -125,8 +118,8 @@ The artifact includes every added, modified, or deleted file reported by the rep
 
 ### When evaluation runs
 
-- **Session start**: widget appears with all objectives empty (○).
-- **`/al-eval`**: keeps the evaluation widget flow in place but currently reports that evaluation logic is unavailable.
+- **Session start**: an enabled directory shows `Incomplete` in the powerline until evaluation results are complete.
+- **`/al-eval`**: resets the status to `Incomplete` and currently reports that evaluation logic is unavailable.
 - **After every agent turn**: the evaluator re-checks automatically when the agent settles (only if the directory is enabled).
 
 ## EXPLANATION.md

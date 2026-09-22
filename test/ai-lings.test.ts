@@ -12,6 +12,7 @@ import extension, {
   readExplanation,
   readUserConfig,
   renderEvaluationStatus,
+  renderExerciseStatus,
   splitModelSlug,
   writeUserConfig,
 } from "../index.ts";
@@ -361,7 +362,7 @@ test("gates prompts through the configured evaluator model", async () => {
   }
 });
 
-test("runs evaluations on session start and renders widget", async () => {
+test("shows incomplete exercise status on session start", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-home-"));
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
   fs.mkdirSync(path.join(cwd, ".pi", "ai-lings"), { recursive: true });
@@ -387,7 +388,7 @@ test("runs evaluations on session start and renders widget", async () => {
       string,
       (event: any, ctx: any) => Promise<unknown>
     >();
-    const widgetCalls: Array<{ id: string; items?: any }> = [];
+    const statusCalls: Array<{ id: string; value?: string }> = [];
     const pi = {
       on: (event: string, cb: (event: any, ctx: any) => Promise<unknown>) => {
         handlers.set(event, cb);
@@ -402,26 +403,47 @@ test("runs evaluations on session start and renders widget", async () => {
       signal: new AbortController().signal,
       ui: {
         notify: () => {},
-        setWidget: (id: string, items?: any) => {
-          widgetCalls.push({ id, items });
+        setWidget: () => {},
+        setStatus: (id: string, value?: string) => {
+          statusCalls.push({ id, value });
         },
       },
     };
 
-    // session_start renders initial empty widget (no evaluation call)
+    // session_start sets an initial incomplete powerline status.
     const startHandler = handlers.get("session_start");
     assert.ok(startHandler);
     await startHandler({}, ctx);
-    const widget = widgetCalls.find((w) => w.id === "ai-lings-evaluations");
-    assert.ok(widget, "widget set on boot");
-    assert.ok(
-      widget.items?.some((i: string) => i.includes("○")),
-      "initial shows pending",
-    );
+    assert.deepEqual(statusCalls, [
+      { id: "ai-lings-exercise", value: "ai-lings exercise: Incomplete" },
+    ]);
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
   }
+});
+
+test("renders exercise completion in the powerline", () => {
+  const calls: Array<{ id: string; value?: string }> = [];
+  const ctx = {
+    ui: {
+      setStatus: (id: string, value?: string) => calls.push({ id, value }),
+    },
+  };
+
+  renderExerciseStatus(
+    ctx as any,
+    true,
+    new Map([["Ready", { complete: true, reason: "" }]]),
+  );
+  renderExerciseStatus(ctx as any, true);
+  renderExerciseStatus(ctx as any, false);
+
+  assert.deepEqual(calls, [
+    { id: "ai-lings-exercise", value: "ai-lings exercise: Complete" },
+    { id: "ai-lings-exercise", value: "ai-lings exercise: Incomplete" },
+    { id: "ai-lings-exercise", value: undefined },
+  ]);
 });
 
 test("renders running evaluations as a highlighted banner", () => {
@@ -542,7 +564,7 @@ evaluations:
       (args: string, ctx: any) => Promise<void>
     >();
     const notifications: string[] = [];
-    const widgets: Array<{ id: string; items?: any }> = [];
+    const statusCalls: Array<{ id: string; value?: string }> = [];
     const pi = {
       on: () => {},
       registerCommand: (
@@ -555,7 +577,9 @@ evaluations:
       cwd,
       ui: {
         notify: (message: string) => notifications.push(message),
-        setWidget: (id: string, items?: any) => widgets.push({ id, items }),
+        setWidget: () => {},
+        setStatus: (id: string, value?: string) =>
+          statusCalls.push({ id, value }),
         theme: {
           bold: (text: string) => text,
           bg: (_color: string, text: string) => text,
@@ -563,10 +587,10 @@ evaluations:
       },
     });
     assert.ok(notifications.includes("Evaluation logic is not implemented"));
-    assert.deepEqual(
-      widgets.find((widget) => widget.id === "ai-lings-evaluations")?.items,
-      ["Evaluation Criteria: Test", "○ Ready"],
-    );
+    assert.deepEqual(statusCalls.at(-1), {
+      id: "ai-lings-exercise",
+      value: "ai-lings exercise: Incomplete",
+    });
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;

@@ -15,7 +15,7 @@ import {
   splitModelSlug,
 } from "./evaluator.ts";
 import { buildEvaluationState } from "./state.ts";
-import { notify, renderEvaluationStatus, renderEvaluations } from "./ui.ts";
+import { notify, renderEvaluationStatus, renderExerciseStatus } from "./ui.ts";
 import type { EvaluationDocument, EvaluationStatus } from "./types.ts";
 
 export default function extension(pi: ExtensionAPI): void {
@@ -23,8 +23,7 @@ export default function extension(pi: ExtensionAPI): void {
 
   pi.on("session_start", (_event, ctx) => {
     try {
-      const document = readEvaluations(ctx.cwd);
-      if (document) renderEvaluations(ctx, document, new Map());
+      renderExerciseStatus(ctx, isDirectoryEnabled(ctx.cwd));
     } catch {
       // malformed EVALUATION.yaml — skip initial widget
     }
@@ -35,7 +34,13 @@ export default function extension(pi: ExtensionAPI): void {
     let model: string;
     try {
       const userConfig = readUserConfig();
-      if (!(isDirectoryEnabled(ctx.cwd) && userConfig.model)) return;
+      const enabled = isDirectoryEnabled(ctx.cwd);
+      if (!enabled) {
+        renderExerciseStatus(ctx, false);
+        return;
+      }
+      renderExerciseStatus(ctx, true);
+      if (!userConfig.model) return;
       model = userConfig.model;
       document = readEvaluations(ctx.cwd);
       if (!document) return;
@@ -48,7 +53,7 @@ export default function extension(pi: ExtensionAPI): void {
       const result = await evaluateDocument(ctx, document, "", model);
       if (result) {
         statuses = result;
-        renderEvaluations(ctx, document, statuses);
+        renderExerciseStatus(ctx, true, statuses);
       }
     } finally {
       renderEvaluationStatus(ctx, false);
@@ -197,6 +202,10 @@ export default function extension(pi: ExtensionAPI): void {
   pi.registerCommand("al-eval", {
     description: "Run exercise evaluations in EVALUATION.yaml",
     handler: async (_args, ctx) => {
+      if (!isDirectoryEnabled(ctx.cwd)) {
+        ctx.ui.notify("ai-lings is not enabled for this directory", "warning");
+        return;
+      }
       const userConfig = readUserConfig();
       if (!userConfig.model) {
         ctx.ui.notify("ai-lings needs a model (set with /al-model)", "warning");
@@ -211,7 +220,7 @@ export default function extension(pi: ExtensionAPI): void {
       try {
         // Placeholder: the command flow and UI remain until evaluation logic is restored.
         statuses = new Map();
-        renderEvaluations(ctx, document, statuses);
+        renderExerciseStatus(ctx, true, statuses);
         ctx.ui.notify("Evaluation logic is not implemented", "warning");
       } finally {
         renderEvaluationStatus(ctx, false);
@@ -236,4 +245,4 @@ export {
   collectChangedFiles,
   prepareJevRequestContext,
 } from "./state.ts";
-export { renderEvaluationStatus } from "./ui.ts";
+export { renderEvaluationStatus, renderExerciseStatus } from "./ui.ts";

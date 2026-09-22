@@ -1,35 +1,28 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { EvaluationDocument, EvaluationStatus } from "./types.ts";
+import type { EvaluationStatus } from "./types.ts";
 
-export function renderEvaluations(
+export function renderExerciseStatus(
   ctx: ExtensionContext,
-  document: EvaluationDocument | null,
-  statuses: Map<string, EvaluationStatus>,
+  enabled: boolean,
+  statuses: Map<string, EvaluationStatus> = new Map(),
 ): void {
-  const evaluations = document?.evaluations ?? [];
-  if (evaluations.length === 0) {
-    ctx.ui.setWidget("ai-lings-evaluations", undefined);
+  if (!enabled) {
+    ctx.ui.setStatus("ai-lings-exercise", undefined);
     return;
   }
-  const header = document?.exerciseName
-    ? `Evaluation Criteria: ${document.exerciseName}`
-    : "Evaluation Criteria:";
-  ctx.ui.setWidget(
-    "ai-lings-evaluations",
-    [
-      header,
-      ...evaluations.map((evaluation) => {
-        const status = statuses.get(evaluation.name);
-        const showReason =
-          evaluation.show && status && !status.complete && status.reason;
-        return `${status?.complete ? "✓" : "○"} ${evaluation.name}${showReason ? ` — ${status.reason}` : ""}`;
-      }),
-    ],
-    { placement: "aboveEditor" },
+  const complete =
+    statuses.size > 0 &&
+    [...statuses.values()].every((status) => status.complete);
+  ctx.ui.setStatus(
+    "ai-lings-exercise",
+    complete ? "ai-lings exercise: Complete" : "ai-lings exercise: Incomplete",
   );
 }
 
-export function renderEvaluationStatus(ctx: ExtensionContext, running: boolean): void {
+export function renderEvaluationStatus(
+  ctx: ExtensionContext,
+  running: boolean,
+): void {
   ctx.ui.setWidget(
     "ai-lings-eval-status",
     running
