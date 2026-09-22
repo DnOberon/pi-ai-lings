@@ -17,8 +17,8 @@ const SUMMARY_OUTPUT_LIMIT = 8_000;
 const SUMMARY_TIMEOUT_MS = 5 * 60_000;
 const SUMMARY_STDERR_LIMIT = 64_000;
 // pi --mode json streams tool-call events and model tokens as JSON lines;
-// 64KB was tripping on protocol noise, not summary size. 256KB is still bounded.
-const SUMMARY_STDOUT_LIMIT = 256_000;
+// 64KB was tripping on protocol noise, not summary size. 1MB matches evaluator.
+const SUMMARY_STDOUT_LIMIT = 1_000_000;
 const SUMMARY_CONCURRENCY = 3;
 
 type CachedSummary = {

@@ -15,6 +15,13 @@ import extension, {
   renderExerciseStatus,
   splitModelSlug,
   writeUserConfig,
+  buildJevRequest,
+  parseJevResponse,
+  parseFallbackResponse,
+  aggregateCriteria,
+  formatSummary,
+  resolveOpenRouterCredential,
+  jevEvaluate,
 } from "../index.ts";
 import fs from "node:fs";
 import os from "node:os";
@@ -538,9 +545,10 @@ test("al-eval warns when config is missing", async () => {
   );
 });
 
-test("al-eval keeps the UI flow without running evaluation logic", async () => {
+test("al-eval runs evaluation with Jev or fallback", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-home-"));
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
+  // Create EVALUATION.yaml first, then commit so git state is clean
   fs.mkdirSync(path.join(cwd, ".pi", "ai-lings"), { recursive: true });
   fs.writeFileSync(
     path.join(cwd, ".pi", "ai-lings", "EVALUATION.yaml"),
@@ -552,6 +560,15 @@ evaluations:
       - A file exists
 `,
   );
+  // Initialize git and commit everything so no changed files need summarizing
+  execFileSync("git", ["init", "-q"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["add", ".pi"], { cwd, stdio: "ignore" });
+  execFileSync(
+    "git",
+    ["-c", "user.name=T", "-c", "user.email=t@t.com", "commit", "-qm", "init"],
+    { cwd, stdio: "ignore" },
+  );
+
   const previousHome = process.env.HOME;
   process.env.HOME = home;
   try {
@@ -575,6 +592,10 @@ evaluations:
     extension(pi as any);
     await commands.get("al-eval")!("", {
       cwd,
+      modelRegistry: {
+        getApiKeyForProvider: async () => undefined,
+      },
+      signal: new AbortController().signal,
       ui: {
         notify: (message: string) => notifications.push(message),
         setWidget: () => {},
@@ -586,11 +607,18 @@ evaluations:
         },
       },
     });
-    assert.ok(notifications.includes("Evaluation logic is not implemented"));
-    assert.deepEqual(statusCalls.at(-1), {
-      id: "ai-lings-exercise",
-      value: "ai-lings exercise: Incomplete",
-    });
+    // Should not contain the placeholder message
+    assert.ok(!notifications.includes("Evaluation logic is not implemented"));
+    // Should produce a notification (evaluator path or error)
+    assert.ok(
+      notifications.length > 0,
+      `expected notifications, got: ${JSON.stringify(notifications)}`,
+    );
+    // Should update the exercise status widget
+    assert.ok(
+      statusCalls.some((s) => s.id === "ai-lings-exercise"),
+      `expected ai-lings-exercise in statusCalls, got: ${JSON.stringify(statusCalls)}, notifications: ${JSON.stringify(notifications)}`,
+    );
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
@@ -695,4 +723,435 @@ test("al-eval warns when EVALUATION.yaml is missing", async () => {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
   }
+});
+
+// --- New evaluation flow tests ---
+
+test("buildJevRequest creates one noul question per criterion", () => {
+  const questions = prepareJevRequestContext(
+    { changed_files: [{ path: "a.ts", status: "M", summary: "modified a" }] },
+    {
+      exerciseName: "T",
+      evaluations: [
+        {
+          name: "R1",
+          show: true,
+          criteria: ["works", "tested"],
+          meetAll: true,
+        },
+        { name: "R2", show: false, criteria: ["exists"], meetAll: false },
+      ],
+    },
+  );
+  const req = buildJevRequest(questions);
+  assert.equal(typeof req.model, "string");
+  assert.equal(Object.keys(req.questions).length, 3);
+  assert.ok(req.questions["R1:1"]);
+  assert.equal(
+    req.questions["R1:1"].noul.affirmative.includes('"works"'),
+    true,
+  );
+  assert.equal(req.questions["R1:1"].noul.negative.includes('"works"'), true);
+  assert.ok(req.questions["R1:2"]);
+  assert.ok(req.questions["R2:1"]);
+  assert.equal(req.state.changed_files.length, 1);
+});
+
+test("parseJevResponse maps probabilities through 0.9 threshold", () => {
+  const questions = [
+    { id: "R:1", evaluation: "R", criterion: "works" },
+    { id: "R:2", evaluation: "R", criterion: "tested" },
+  ];
+  const body = {
+    answers: {
+      "R:1": { noul: 0.95 },
+      "R:2": { noul: 0.5 },
+    },
+  };
+  const results = parseJevResponse(body, questions);
+  assert.ok(results);
+  assert.equal(results.length, 2);
+  assert.equal(results[0].passed, true);
+  assert.equal(results[0].probability, 0.95);
+  assert.equal(results[1].passed, false);
+  assert.equal(results[1].probability, 0.5);
+});
+
+test("parseJevResponse rejects missing, malformed, and out of range answers", () => {
+  const questions = [{ id: "R:1", evaluation: "R", criterion: "works" }];
+  // Missing answer for a question
+  assert.equal(parseJevResponse({ answers: {} }, questions), null);
+  // Non-numeric noul
+  assert.equal(
+    parseJevResponse({ answers: { "R:1": { noul: "high" } } }, questions),
+    null,
+  );
+  // noul > 1
+  assert.equal(
+    parseJevResponse({ answers: { "R:1": { noul: 1.5 } } }, questions),
+    null,
+  );
+  // noul < 0
+  assert.equal(
+    parseJevResponse({ answers: { "R:1": { noul: -0.1 } } }, questions),
+    null,
+  );
+  // Non-finite
+  assert.equal(
+    parseJevResponse({ answers: { "R:1": { noul: Infinity } } }, questions),
+    null,
+  );
+  // Empty answers object
+  assert.equal(parseJevResponse(null, questions), null);
+  assert.equal(parseJevResponse(undefined as any, questions), null);
+  assert.equal(parseJevResponse("not json" as any, questions), null);
+});
+
+test("parseJevResponse handles exact threshold boundary", () => {
+  const questions = [{ id: "R:1", evaluation: "R", criterion: "works" }];
+  const above = parseJevResponse(
+    { answers: { "R:1": { noul: 0.9 } } },
+    questions,
+  );
+  assert.ok(above);
+  assert.equal(above[0].passed, true);
+  const below = parseJevResponse(
+    { answers: { "R:1": { noul: 0.899 } } },
+    questions,
+  );
+  assert.ok(below);
+  assert.equal(below![0].passed, false);
+});
+
+test("parseJevResponse rejects unknown answer IDs", () => {
+  const questions = [{ id: "R:1", evaluation: "R", criterion: "works" }];
+  assert.equal(
+    parseJevResponse(
+      { answers: { "R:1": { noul: 0.95 }, unknown: { noul: 0.99 } } },
+      questions,
+    ),
+    null,
+  );
+});
+
+test("parseJevResponse rejects duplicate answer IDs", () => {
+  // duplicate IDs can't actually occur in valid JSON keys, but test that
+  // malformed answers with extra entries for a requested ID still fail
+  const questions = [
+    { id: "R:1", evaluation: "R", criterion: "works" },
+    { id: "R:2", evaluation: "R", criterion: "tested" },
+  ];
+  assert.equal(
+    parseJevResponse({ answers: { "R:1": { noul: 0.95 } } }, questions),
+    null,
+  );
+});
+
+test("aggregateCriteria handles meetAll true vs false", () => {
+  const evals = [
+    { name: "All", criteria: ["a", "b"], meetAll: true },
+    { name: "Any", criteria: ["c", "d"], meetAll: false },
+  ];
+  const criteria = [
+    {
+      questionId: "All:1",
+      evaluation: "All",
+      criterion: "a",
+      passed: true,
+      reason: "",
+    },
+    {
+      questionId: "All:2",
+      evaluation: "All",
+      criterion: "b",
+      passed: false,
+      reason: "miss",
+    },
+    {
+      questionId: "Any:1",
+      evaluation: "Any",
+      criterion: "c",
+      passed: false,
+      reason: "nope",
+    },
+    {
+      questionId: "Any:2",
+      evaluation: "Any",
+      criterion: "d",
+      passed: true,
+      reason: "",
+    },
+  ];
+  const { statuses, failedCriteria } = aggregateCriteria(criteria, evals);
+  assert.equal(statuses.get("All")?.complete, false);
+  assert.equal(statuses.get("Any")?.complete, true);
+  assert.equal(failedCriteria.length, 1);
+  assert.equal(failedCriteria[0].evaluation, "All");
+});
+
+test("aggregateCriteria all-pass produces complete", () => {
+  const evals = [{ name: "X", criteria: ["a"], meetAll: true }];
+  const criteria = [
+    {
+      questionId: "X:1",
+      evaluation: "X",
+      criterion: "a",
+      passed: true,
+      reason: "",
+    },
+  ];
+  const { statuses } = aggregateCriteria(criteria, evals);
+  assert.equal(statuses.get("X")?.complete, true);
+});
+
+test("aggregateCriteria all-fail produces incomplete", () => {
+  const evals = [{ name: "X", criteria: ["a", "b"], meetAll: false }];
+  const criteria = [
+    {
+      questionId: "X:1",
+      evaluation: "X",
+      criterion: "a",
+      passed: false,
+      reason: "no",
+    },
+    {
+      questionId: "X:2",
+      evaluation: "X",
+      criterion: "b",
+      passed: false,
+      reason: "no",
+    },
+  ];
+  const { statuses } = aggregateCriteria(criteria, evals);
+  assert.equal(statuses.get("X")?.complete, false);
+});
+
+test("aggregateCriteria handles empty criteria with natural semantics", () => {
+  // every([]) is vacuously true
+  const evalsMeetAll = [{ name: "X", criteria: [], meetAll: true }];
+  const { statuses: s1 } = aggregateCriteria([], evalsMeetAll);
+  assert.equal(s1.get("X")?.complete, true);
+  // some([]) is false
+  const evalsMeetAny = [{ name: "Y", criteria: [], meetAll: false }];
+  const { statuses: s2 } = aggregateCriteria([], evalsMeetAny);
+  assert.equal(s2.get("Y")?.complete, false);
+});
+
+test("aggregateCriteria reports failed criteria with parent evaluation", () => {
+  const evals = [
+    { name: "Ready", criteria: ["works", "tested"], meetAll: true },
+  ];
+  const criteria = [
+    {
+      questionId: "Ready:1",
+      evaluation: "Ready",
+      criterion: "works",
+      passed: true,
+      reason: "",
+    },
+    {
+      questionId: "Ready:2",
+      evaluation: "Ready",
+      criterion: "tested",
+      passed: false,
+      reason: "not tested",
+    },
+  ];
+  const { statuses, failedCriteria } = aggregateCriteria(criteria, evals);
+  assert.equal(statuses.get("Ready")?.complete, false);
+  assert.match(statuses.get("Ready")?.reason ?? "", /not tested/);
+  assert.equal(failedCriteria.length, 1);
+  assert.equal(failedCriteria[0].evaluation, "Ready");
+});
+
+test("formatSummary reports evaluator path and failures", () => {
+  const statuses = new Map([
+    ["R1", { complete: true, reason: "All criteria satisfied" }],
+    ["R2", { complete: false, reason: "Failed: R2:1 — missing" }],
+  ]);
+  const failedCriteria = [
+    {
+      questionId: "R2:1",
+      evaluation: "R2",
+      criterion: "exists",
+      passed: false,
+      reason: "missing",
+    },
+  ];
+  const summary = formatSummary("jev", statuses, failedCriteria);
+  assert.match(summary, /Jev/);
+  assert.match(summary, /1\/2/);
+  assert.match(summary, /R2:1/);
+});
+
+test("formatSummary shows Pi fallback label", () => {
+  const s = formatSummary("fallback", new Map(), []);
+  assert.match(s, /Pi fallback/);
+});
+
+test("formatSummary shows unavailable label", () => {
+  const s = formatSummary("unavailable", new Map(), []);
+  assert.match(s, /Unavailable/);
+});
+
+test("parseFallbackResponse handles valid output", () => {
+  const questions = [{ id: "R:1", evaluation: "R", criterion: "works" }];
+  const text = JSON.stringify({
+    "R:1": { passed: true, reason: "works fine" },
+  });
+  const results = parseFallbackResponse(text, questions);
+  assert.ok(results);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].passed, true);
+  assert.equal(results[0].reason, "works fine");
+});
+
+test("parseFallbackResponse strips markdown fences", () => {
+  const questions = [{ id: "R:1", evaluation: "R", criterion: "works" }];
+  const text =
+    "```json\n" +
+    JSON.stringify({ "R:1": { passed: false, reason: "nope" } }) +
+    "\n```";
+  const results = parseFallbackResponse(text, questions);
+  assert.ok(results);
+  assert.equal(results[0].passed, false);
+});
+
+test("parseFallbackResponse rejects unknown IDs", () => {
+  const questions = [{ id: "R:1", evaluation: "R", criterion: "works" }];
+  const text = JSON.stringify({
+    "R:1": { passed: true, reason: "" },
+    unknown: { passed: false, reason: "" },
+  });
+  assert.equal(parseFallbackResponse(text, questions), null);
+});
+
+test("parseFallbackResponse rejects missing question IDs", () => {
+  const questions = [
+    { id: "R:1", evaluation: "R", criterion: "works" },
+    { id: "R:2", evaluation: "R", criterion: "tested" },
+  ];
+  const text = JSON.stringify({ "R:1": { passed: true, reason: "" } });
+  assert.equal(parseFallbackResponse(text, questions), null);
+});
+
+test("parseFallbackResponse rejects non-boolean passed", () => {
+  const questions = [{ id: "R:1", evaluation: "R", criterion: "works" }];
+  assert.equal(
+    parseFallbackResponse(
+      JSON.stringify({ "R:1": { passed: "yes", reason: "" } }),
+      questions,
+    ),
+    null,
+  );
+});
+
+test("resolveOpenRouterCredential uses registry first", async () => {
+  const registry = {
+    getApiKeyForProvider: async (provider: string) => {
+      assert.equal(provider, "openrouter");
+      return "sk-registry-key";
+    },
+  };
+  const result = await resolveOpenRouterCredential(registry);
+  assert.equal(result.ok, true);
+  assert.equal((result as any).apiKey, "sk-registry-key");
+});
+
+test("resolveOpenRouterCredential falls back to env var", async () => {
+  const prev = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = "sk-env-key";
+  try {
+    const result = await resolveOpenRouterCredential({});
+    assert.equal(result.ok, true);
+    assert.equal((result as any).apiKey, "sk-env-key");
+  } finally {
+    if (prev === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = prev;
+  }
+});
+
+test("resolveOpenRouterCredential returns error when no credential", async () => {
+  const prev = process.env.OPENROUTER_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+  try {
+    const result = await resolveOpenRouterCredential({});
+    assert.equal(result.ok, false);
+    assert.match((result as any).error, /No OpenRouter credential/);
+  } finally {
+    if (prev === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = prev;
+  }
+});
+
+test("jevEvaluate sends correct request and parses response", async () => {
+  const context = prepareJevRequestContext(
+    { changed_files: [] },
+    {
+      evaluations: [
+        { name: "R", show: true, criteria: ["works"], meetAll: true },
+      ],
+    },
+  );
+  // Mock fetch to return a valid response
+  const originalFetch = globalThis.fetch;
+  let capturedUrl = "";
+  let capturedBody: unknown;
+  let capturedHeaders: Record<string, string> = {};
+  globalThis.fetch = async (url: RequestInfo | URL, init?: RequestInit) => {
+    capturedUrl = typeof url === "string" ? url : url.toString();
+    capturedBody = init?.body ? JSON.parse(init.body as string) : undefined;
+    capturedHeaders = (init?.headers as Record<string, string>) ?? {};
+    return new Response(
+      JSON.stringify({
+        answers: { "R:1": { noul: 0.95 } },
+      }),
+      { status: 200 },
+    );
+  };
+  try {
+    const result = await jevEvaluate(context, { ok: true, apiKey: "test-key" });
+    assert.ok("results" in result);
+    assert.equal(result.results.length, 1);
+    assert.equal(result.results[0].passed, true);
+    assert.match(capturedUrl, /openrouter/);
+    assert.equal(capturedHeaders["Authorization"], "Bearer test-key");
+    assert.ok(capturedBody);
+    assert.equal((capturedBody as any).model, "typesafe/jev-1.13");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("jevEvaluate returns error on HTTP failure", async () => {
+  const context = prepareJevRequestContext(
+    { changed_files: [] },
+    {
+      evaluations: [
+        { name: "R", show: true, criteria: ["works"], meetAll: true },
+      ],
+    },
+  );
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(null, { status: 401 });
+  try {
+    const result = await jevEvaluate(context, { ok: true, apiKey: "bad" });
+    assert.ok("error" in result);
+    assert.match(result.error, /401/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("jevEvaluate returns error when not authenticated", async () => {
+  const context = prepareJevRequestContext(
+    { changed_files: [] },
+    {
+      evaluations: [
+        { name: "R", show: true, criteria: ["works"], meetAll: true },
+      ],
+    },
+  );
+  const result = await jevEvaluate(context, { ok: false, error: "no key" });
+  assert.ok("error" in result);
 });

@@ -72,7 +72,7 @@ Rules work best when they describe behavior the evaluator can detect in a single
 
 ## EVALUATION.yaml
 
-A YAML checklist of objectives used by the evaluator agent (a fresh `pi` subprocess with read-only tools) to examine your repository and mark each item complete or not. When ai-lings is enabled for the current directory, the exercise status appears in the powerline as `Complete` or `Incomplete`.
+A YAML checklist of objectives used by the evaluator to examine your repository and mark each item complete or not. The evaluator builds a bounded Git-state artifact, creates one binary question per criterion, and submits all questions in a single OpenRouter Decisions API request using the `typesafe/jev-1.13` model. If Jev is unreachable, it falls back to the configured `/al-model` agent in a tool-free Pi subprocess. When ai-lings is enabled for the current directory, the exercise status appears in the powerline as `Complete` or `Incomplete`.
 
 ```yaml
 exercise_name: Test Exercise
@@ -96,15 +96,19 @@ evaluations:
 
 ### How evaluation works
 
-The evaluator spawns a new `pi` subprocess with `--tools read,grep,find,ls` and the model you configured. It reads your repo, checks each objective's criteria, and returns a JSON array:
+The evaluator first builds a bounded state artifact from the repository's Git status (same state that `/al-state` displays). It then creates one binary question per evaluation criterion and submits all questions in a single request to the [OpenRouter Decisions API](https://openrouter.ai) using the [`typesafe/jev-1.13`](https://openrouter.ai/typesafe/jev-1.13) model. Each criterion is assessed independently:
 
-```json
-[{"name": "Correct AGENTS.md", "complete": false, "reason": "No AGENTS.md found"}]
-```
+- Jev returns a positive probability for each question.
+- A probability of at least `0.9` passes the criterion.
+- TypeScript applies the `meet_all` aggregation rule: `true` requires every criterion to pass; `false` requires at least one.
 
-### Evaluation state for Jev
+All criterion decisions are requested in a single API call. If the Jev API is unreachable, returns an unusable response, or no OpenRouter credential is configured, the evaluator automatically falls back to the configured `/al-model` agent in a tool-free Pi subprocess. The fallback receives the same pre-built state and criteria list, assesses each criterion independently, and returns per-criterion results. The subprocess has no `--tools` flag and cannot read files or run commands.
 
-`/al-state` builds a bounded, JSON-serializable state artifact for future Jev/OpenRouter Decisions requests. Its stable shape is:
+The result — successful or not — is reported as a concise notification showing the evaluator path (`Jev` or `Pi fallback`), the pass/fail count, and any failing criteria with their reasons. Exercise completion status in the powerline updates accordingly.
+
+### Evaluation state
+
+`/al-state` builds a bounded, JSON-serializable state artifact. Its stable shape is:
 
 ```json
 {
@@ -114,12 +118,16 @@ The evaluator spawns a new `pi` subprocess with `--tools read,grep,find,ls` and 
 }
 ```
 
-The artifact includes every added, modified, or deleted file reported by the repository's Git status, in deterministic path order. Summaries are generated through a read-only Pi subprocess; full diffs and file contents are not included in the artifact. Evaluation criteria are exposed as future criterion-level question context, but this extension does not submit questions, call OpenRouter, run a Jev decision loop, or change evaluation verdicts.
+The artifact includes every added, modified, or deleted file reported by the repository's Git status, in deterministic path order. Summaries are generated through a read-only Pi subprocess; full diffs and file contents are not included in the artifact.
+
+### OpenRouter authentication
+
+The evaluator resolves OpenRouter credentials from Pi's provider registry first (via `getApiKeyForProvider("openrouter")`), then falls back to `OPENROUTER_API_KEY` environment variable. Never put API keys in exercise files or commit them.
 
 ### When evaluation runs
 
 - **Session start**: an enabled directory shows `Incomplete` in the powerline until evaluation results are complete.
-- **`/al-eval`**: resets the status to `Incomplete` and currently reports that evaluation logic is unavailable.
+- **`/al-eval`**: immediately rebuilds the state and runs the evaluation flow. Results appear in a notification and the powerline updates to `Complete` or `Incomplete`.
 - **After every agent turn**: the evaluator re-checks automatically when the agent settles (only if the directory is enabled).
 
 ## EXPLANATION.md

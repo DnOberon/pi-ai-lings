@@ -31,3 +31,23 @@ export type JevRequestContext = {
   questions: JevQuestion[];
 };
 export type EvaluatorContext = ExtensionContext;
+
+// ponytail: additive result types; preserves existing EvaluationStatus shape for callers
+export type CriterionResult = {
+  questionId: string;
+  evaluation: string;
+  criterion: string;
+  passed: boolean;
+  probability?: number;
+  reason: string;
+};
+
+export type EvaluatorPath = "jev" | "fallback" | "unavailable";
+
+export type EvaluationRunResult = {
+  path: EvaluatorPath;
+  statuses: Map<string, EvaluationStatus>;
+  criteria: CriterionResult[];
+  failedCriteria: CriterionResult[];
+  error?: string;
+};

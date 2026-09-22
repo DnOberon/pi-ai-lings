@@ -10,11 +10,13 @@ import {
 } from "./config.ts";
 import { readEvaluations, readExplanation, readRules } from "./documents.ts";
 import {
-  evaluateDocument,
   evaluatePrompt,
+  evaluateWithState,
+  formatSummary,
+  resolveOpenRouterCredential,
   splitModelSlug,
 } from "./evaluator.ts";
-import { buildEvaluationState } from "./state.ts";
+import { buildEvaluationState, prepareJevRequestContext } from "./state.ts";
 import { notify, renderEvaluationStatus, renderExerciseStatus } from "./ui.ts";
 import type { EvaluationDocument, EvaluationStatus } from "./types.ts";
 
@@ -29,36 +31,6 @@ export default function extension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("agent_settled", async (_event, ctx) => {
-    let document: EvaluationDocument | null;
-    let model: string;
-    try {
-      const userConfig = readUserConfig();
-      const enabled = isDirectoryEnabled(ctx.cwd);
-      if (!enabled) {
-        renderExerciseStatus(ctx, false);
-        return;
-      }
-      renderExerciseStatus(ctx, true);
-      if (!userConfig.model) return;
-      model = userConfig.model;
-      document = readEvaluations(ctx.cwd);
-      if (!document) return;
-    } catch (error) {
-      notify(ctx, (error as Error).message);
-      return;
-    }
-    renderEvaluationStatus(ctx, true);
-    try {
-      const result = await evaluateDocument(ctx, document, "", model);
-      if (result) {
-        statuses = result;
-        renderExerciseStatus(ctx, true, statuses);
-      }
-    } finally {
-      renderEvaluationStatus(ctx, false);
-    }
-  });
   pi.on("input", async (event, ctx): Promise<InputEventResult> => {
     try {
       const userConfig = readUserConfig();
@@ -211,6 +183,7 @@ export default function extension(pi: ExtensionAPI): void {
         ctx.ui.notify("ai-lings needs a model (set with /al-model)", "warning");
         return;
       }
+      const model = userConfig.model;
       const document = readEvaluations(ctx.cwd);
       if (!document) {
         ctx.ui.notify("No EVALUATION.yaml found", "warning");
@@ -218,10 +191,40 @@ export default function extension(pi: ExtensionAPI): void {
       }
       renderEvaluationStatus(ctx, true);
       try {
-        // Placeholder: the command flow and UI remain until evaluation logic is restored.
-        statuses = new Map();
+        const state = await buildEvaluationState(ctx.cwd, model, {
+          signal: ctx.signal,
+        });
+        const context = prepareJevRequestContext(state, document);
+        const credential = await resolveOpenRouterCredential(ctx.modelRegistry);
+        const result = await evaluateWithState(
+          context,
+          document.evaluations,
+          credential,
+          model,
+          ctx.signal,
+        );
+        statuses = result.statuses;
         renderExerciseStatus(ctx, true, statuses);
-        ctx.ui.notify("Evaluation logic is not implemented", "warning");
+        const summary = formatSummary(
+          result.path,
+          result.statuses,
+          result.failedCriteria,
+        );
+        if (result.path === "unavailable") {
+          notify(ctx, `${summary}${result.error ? `: ${result.error}` : ""}`);
+        } else if (result.path === "fallback") {
+          const parts = [summary];
+          if (result.error) parts.push(`(Jev: ${result.error})`);
+          ctx.ui.notify(parts.join(" "), "info");
+        } else {
+          ctx.ui.notify(summary, "info");
+        }
+      } catch (error) {
+        const name =
+          (error as Error).name === "AbortError"
+            ? "Cancelled"
+            : "Could not evaluate";
+        ctx.ui.notify(`${name}: ${(error as Error).message}`, "warning");
       } finally {
         renderEvaluationStatus(ctx, false);
       }
@@ -236,6 +239,15 @@ export {
 } from "./config.ts";
 export { readEvaluations, readExplanation } from "./documents.ts";
 export {
+  buildJevRequest,
+  evaluateWithState,
+  aggregateCriteria,
+  formatSummary,
+  parseJevResponse,
+  parseFallbackResponse,
+  jevEvaluate,
+  fallbackEvaluate,
+  resolveOpenRouterCredential,
   parseEvaluationResults,
   parseVerdict,
   splitModelSlug,
