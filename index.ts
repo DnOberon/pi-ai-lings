@@ -14,6 +14,7 @@ import {
   evaluatePrompt,
   splitModelSlug,
 } from "./evaluator.ts";
+import { buildEvaluationState } from "./state.ts";
 import { notify, renderEvaluationStatus, renderEvaluations } from "./ui.ts";
 import type { EvaluationDocument, EvaluationStatus } from "./types.ts";
 
@@ -153,6 +154,46 @@ export default function extension(pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerCommand("al-state", {
+    description: "Build the current exercise state for future Jev evaluation",
+    handler: async (_args, ctx) => {
+      try {
+        const userConfig = readUserConfig();
+        if (!(isDirectoryEnabled(ctx.cwd) && userConfig.model)) {
+          ctx.ui.notify(
+            "ai-lings is not enabled (enable with /al-enable, set model with /al-model)",
+            "warning",
+          );
+          return;
+        }
+        ctx.ui.setWidget(
+          "ai-lings-state-progress",
+          ["Building evaluation state…"],
+          { placement: "aboveEditor" },
+        );
+        const state = await buildEvaluationState(ctx.cwd, userConfig.model, {
+          signal: ctx.signal,
+          onProgress(current, total, file) {
+            ctx.ui.setWidget(
+              "ai-lings-state-progress",
+              [`Building evaluation state (${current}/${total}): ${file}`],
+              { placement: "aboveEditor" },
+            );
+          },
+        });
+        ctx.ui.setWidget("ai-lings-state-progress", undefined);
+        ctx.ui.notify(JSON.stringify(state, null, 2), "info");
+      } catch (error) {
+        ctx.ui.setWidget("ai-lings-state-progress", undefined);
+        const name =
+          (error as Error).name === "AbortError"
+            ? "Cancelled"
+            : `Could not build evaluation state`;
+        ctx.ui.notify(`${name}: ${(error as Error).message}`, "warning");
+      }
+    },
+  });
+
   pi.registerCommand("al-eval", {
     description: "Run exercise evaluations in EVALUATION.yaml",
     handler: async (_args, ctx) => {
@@ -193,4 +234,9 @@ export {
   parseVerdict,
   splitModelSlug,
 } from "./evaluator.ts";
+export {
+  buildEvaluationState,
+  collectChangedFiles,
+  prepareJevRequestContext,
+} from "./state.ts";
 export { renderEvaluationStatus } from "./ui.ts";

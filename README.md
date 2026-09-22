@@ -109,6 +109,20 @@ The widget updates in place:
 ○  Has a working build  (package.json has no build script)
 ```
 
+### Evaluation state for Jev
+
+`/al-state` builds a bounded, JSON-serializable state artifact for future Jev/OpenRouter Decisions requests. Its stable shape is:
+
+```json
+{
+  "changed_files": [
+    { "path": "src/example.ts", "status": "M", "summary": "..." }
+  ]
+}
+```
+
+The artifact includes every added, modified, or deleted file reported by the repository's Git status, in deterministic path order. Summaries are generated through a read-only Pi subprocess; full diffs and file contents are not included in the artifact. Evaluation criteria are exposed as future criterion-level question context, but this extension does not submit questions, call OpenRouter, run a Jev decision loop, or change evaluation verdicts.
+
 ### When evaluation runs
 
 - **Session start**: widget appears with all objectives empty (○).

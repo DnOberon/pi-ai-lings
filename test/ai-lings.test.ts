@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
 import extension, {
+  buildEvaluationState,
+  collectChangedFiles,
   isDirectoryEnabled,
   parseEvaluationResults,
   parseVerdict,
+  prepareJevRequestContext,
   readEvaluations,
   readExplanation,
   readUserConfig,
@@ -131,6 +135,108 @@ test("splits provider/model slugs", () => {
     id: "openai/gpt-4o",
   });
   assert.throws(() => splitModelSlug("gpt-4o"), /provider\/model/);
+});
+
+test("builds deterministic A/M/D evaluation state and Jev question context", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-state-"));
+  const runGit = (args: string[]) =>
+    execFileSync("git", args, { cwd, stdio: "ignore" });
+  runGit(["init", "-q"]);
+  fs.writeFileSync(
+    path.join(cwd, "modified.ts"),
+    "export const before = true;\n",
+  );
+  fs.writeFileSync(
+    path.join(cwd, "deleted.ts"),
+    "export const removed = true;\n",
+  );
+  runGit(["add", "."]);
+  runGit([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "-qm",
+    "initial",
+  ]);
+  fs.writeFileSync(
+    path.join(cwd, "modified.ts"),
+    "export const after = true;\n",
+  );
+  fs.rmSync(path.join(cwd, "deleted.ts"));
+  fs.writeFileSync(path.join(cwd, "added.ts"), "export const added = true;\n");
+
+  const state = await buildEvaluationState(cwd, "test/model", {
+    summarize: async ({ path: filename, status }) =>
+      `${status} summary for ${filename}`,
+  });
+  assert.deepEqual(state.changed_files, [
+    { path: "added.ts", status: "A", summary: "A summary for added.ts" },
+    { path: "deleted.ts", status: "D", summary: "D summary for deleted.ts" },
+    { path: "modified.ts", status: "M", summary: "M summary for modified.ts" },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(state)), state);
+
+  const request = prepareJevRequestContext(state, {
+    exerciseName: "Test",
+    evaluations: [
+      {
+        name: "Ready",
+        show: true,
+        criteria: ["works", "is tested"],
+        meetAll: true,
+      },
+    ],
+  });
+  assert.deepEqual(request.questions, [
+    { id: "Ready:1", evaluation: "Ready", criterion: "works" },
+    { id: "Ready:2", evaluation: "Ready", criterion: "is tested" },
+  ]);
+});
+
+test("maps Git renames to deleted and added paths", () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-state-"));
+  const runGit = (args: string[]) =>
+    execFileSync("git", args, { cwd, stdio: "ignore" });
+  runGit(["init", "-q"]);
+  fs.writeFileSync(path.join(cwd, "old.ts"), "export const value = true;\n");
+  runGit(["add", "."]);
+  runGit([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "-qm",
+    "initial",
+  ]);
+  runGit(["mv", "old.ts", "new.ts"]);
+
+  assert.deepEqual(collectChangedFiles(cwd), [
+    { path: "new.ts", status: "A" },
+    { path: "old.ts", status: "D" },
+  ]);
+});
+
+test("rejects empty or failed state summaries instead of inventing one", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-state-"));
+  execFileSync("git", ["init", "-q"], { cwd, stdio: "ignore" });
+  fs.writeFileSync(path.join(cwd, "added.ts"), "export const added = true;\n");
+  await assert.rejects(
+    buildEvaluationState(cwd, "test/model", {
+      summarize: async () => "",
+    }),
+    /Summary is empty for added.ts/,
+  );
+  await assert.rejects(
+    buildEvaluationState(cwd, "test/model", {
+      summarize: async () => {
+        throw new Error("summary subprocess failed");
+      },
+    }),
+    /summary subprocess failed/,
+  );
 });
 
 test("gates prompts through the configured evaluator model", async () => {
