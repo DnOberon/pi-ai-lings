@@ -6,7 +6,6 @@ import extension, {
   parseVerdict,
   readEvaluations,
   readExplanation,
-  readProjectConfig,
   readUserConfig,
   renderEvaluationStatus,
   splitModelSlug,
@@ -15,18 +14,6 @@ import extension, {
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
-test("reads enabled project config", () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
-  fs.mkdirSync(path.join(cwd, ".pi", "ai-lings"), { recursive: true });
-  fs.writeFileSync(
-    path.join(cwd, ".pi", "ai-lings", "config.json"),
-    JSON.stringify({ enabled: true, model: "openai/gpt-4o-mini" }),
-  );
-  assert.deepEqual(readProjectConfig(cwd), {
-    model: "openai/gpt-4o-mini",
-  });
-});
 
 test("enables a directory and its children from the user config", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
@@ -38,16 +25,6 @@ test("enables a directory and its children from the user config", () => {
   });
   assert.equal(isDirectoryEnabled(path.join(root, "exercise"), config), true);
   assert.equal(isDirectoryEnabled(`${root}-sibling`, config), false);
-});
-
-test("reads evaluationIntervalMs when set (deprecated config)", () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
-  fs.mkdirSync(path.join(cwd, ".pi", "ai-lings"), { recursive: true });
-  fs.writeFileSync(
-    path.join(cwd, ".pi", "ai-lings", "config.json"),
-    JSON.stringify({ enabled: true, model: "m/m", evaluationIntervalMs: 9999 }),
-  );
-  assert.deepEqual(readProjectConfig(cwd), { model: "m/m" });
 });
 
 test("reads EXPLANATION.md", () => {
@@ -130,67 +107,6 @@ test("rejects duplicate evaluation names", () => {
   assert.throws(() => readEvaluations(cwd), /Duplicate evaluation name: Dup/);
 });
 
-test("ignores disabled or missing project config", () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
-  assert.equal(readProjectConfig(cwd), null);
-});
-
-test("displays evaluation criteria without running when disabled", async () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
-  const directory = path.join(cwd, ".pi", "ai-lings");
-  fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(
-    path.join(directory, "config.json"),
-    JSON.stringify({ enabled: false, model: "test/model" }),
-  );
-  fs.writeFileSync(
-    path.join(directory, "EVALUATION.yaml"),
-    "evaluations:\n  - name: Ready\n    show: true\n    criteria: [Works]\n",
-  );
-
-  const handlers = new Map<string, (event: any, ctx: any) => Promise<void>>();
-  const widgetCalls: Array<{ id: string; items?: any }> = [];
-  const notifications: string[] = [];
-  const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
-  const pi = {
-    on: (event: string, cb: (event: any, ctx: any) => Promise<void>) =>
-      handlers.set(event, cb),
-    registerCommand: (
-      name: string,
-      opts: { handler: (args: string, ctx: any) => Promise<void> },
-    ) => commands.set(name, opts.handler),
-  };
-  extension(pi as any);
-  const ctx = {
-    cwd,
-    ui: {
-      notify: (message: string) => notifications.push(message),
-      setWidget: (id: string, items?: any) => widgetCalls.push({ id, items }),
-    },
-    modelRegistry: {
-      streamSimple: () => {
-        throw new Error("must not evaluate when disabled");
-      },
-    },
-  };
-
-  const startHandler = handlers.get("session_start");
-  assert.ok(startHandler);
-  await startHandler({}, ctx);
-  const settledHandler = handlers.get("agent_settled");
-  assert.ok(settledHandler);
-  await settledHandler({}, ctx);
-  const command = commands.get("al-eval");
-  assert.ok(command);
-  await command("", ctx);
-  assert.ok(
-    widgetCalls.some((call) =>
-      call.items?.some((item: string) => item.includes("Evaluation Criteria:")),
-    ),
-  );
-  assert.deepEqual(notifications, []);
-});
-
 test("parses strict evaluator verdicts", () => {
   assert.deepEqual(
     parseVerdict({
@@ -218,109 +134,133 @@ test("splits provider/model slugs", () => {
 });
 
 test("gates prompts through the configured evaluator model", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-home-"));
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
-  const directory = path.join(cwd, ".pi", "ai-lings");
-  fs.mkdirSync(directory, { recursive: true });
+  fs.mkdirSync(path.join(cwd, ".pi", "ai-lings"), { recursive: true });
   fs.writeFileSync(
-    path.join(directory, "config.json"),
-    JSON.stringify({ enabled: true, model: "test/model" }),
+    path.join(cwd, ".pi", "ai-lings", "RULES.md"),
+    "Only ask about tests.",
   );
-  fs.writeFileSync(path.join(directory, "RULES.md"), "Only ask about tests.");
+  // Set up user config: enable cwd and set model
+  writeUserConfig(
+    { directories: [cwd], model: "test/model" },
+    path.join(home, ".pi", "agent", "extensions", "ai-lings", "config.json"),
+  );
 
-  const handlers = new Map<
-    string,
-    (event: any, ctx: any) => Promise<unknown>
-  >();
-  let requested: any;
-  const widgetCalls: Array<{ id: string; items?: any; options?: any }> = [];
-  const pi = {
-    on: (
-      event: string,
-      callback: (event: any, ctx: any) => Promise<unknown>,
-    ) => {
-      handlers.set(event, callback);
-    },
-    registerCommand: () => {},
-  };
-  extension(pi as any);
-  const ctx = {
-    cwd,
-    modelRegistry: {
-      find: (provider: string, id: string) => ({ provider, id }),
-      streamSimple: (model: any, context: any) => {
-        requested = { model, context };
-        return {
-          result: async () => ({
-            content: [{ type: "text", text: '{"allow":true,"reason":"ok"}' }],
-          }),
-        };
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const handlers = new Map<
+      string,
+      (event: any, ctx: any) => Promise<unknown>
+    >();
+    let requested: any;
+    const widgetCalls: Array<{ id: string; items?: any; options?: any }> = [];
+    const pi = {
+      on: (
+        event: string,
+        callback: (event: any, ctx: any) => Promise<unknown>,
+      ) => {
+        handlers.set(event, callback);
       },
-    },
-    signal: new AbortController().signal,
-    ui: {
-      notify: () => {},
-      setWidget: (id: string, items?: any, options?: any) => {
-        widgetCalls.push({ id, items, options });
+      registerCommand: () => {},
+    };
+    extension(pi as any);
+    const ctx = {
+      cwd,
+      modelRegistry: {
+        find: (provider: string, id: string) => ({ provider, id }),
+        streamSimple: (model: any, context: any) => {
+          requested = { model, context };
+          return {
+            result: async () => ({
+              content: [{ type: "text", text: '{"allow":true,"reason":"ok"}' }],
+            }),
+          };
+        },
       },
-    },
-  };
-  const handler = handlers.get("input");
-  assert.ok(handler);
-  assert.deepEqual(await handler({ text: "What tests exist?" }, ctx), {
-    action: "continue",
-  });
-  assert.equal(requested.model.provider, "test");
-  assert.match(requested.context.messages[0].content, /What tests exist/);
+      signal: new AbortController().signal,
+      ui: {
+        notify: () => {},
+        setWidget: (id: string, items?: any, options?: any) => {
+          widgetCalls.push({ id, items, options });
+        },
+      },
+    };
+    const handler = handlers.get("input");
+    assert.ok(handler);
+    assert.deepEqual(await handler({ text: "What tests exist?" }, ctx), {
+      action: "continue",
+    });
+    assert.equal(requested.model.provider, "test");
+    assert.match(requested.context.messages[0].content, /What tests exist/);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
 });
 
 test("runs evaluations on session start and renders widget", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-home-"));
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
-  const directory = path.join(cwd, ".pi", "ai-lings");
-  fs.mkdirSync(directory, { recursive: true });
+  fs.mkdirSync(path.join(cwd, ".pi", "ai-lings"), { recursive: true });
   fs.writeFileSync(
-    path.join(directory, "config.json"),
-    JSON.stringify({ enabled: true, model: "test/model" }),
-  );
-  fs.writeFileSync(
-    path.join(directory, "EVALUATION.yaml"),
+    path.join(cwd, ".pi", "ai-lings", "EVALUATION.yaml"),
     "exercise_name: Test\nevaluations:\n  - name: Ready\n    show: true\n    criteria:\n      - Works\n",
   );
-
-  const handlers = new Map<
-    string,
-    (event: any, ctx: any) => Promise<unknown>
-  >();
-  const widgetCalls: Array<{ id: string; items?: any }> = [];
-  const pi = {
-    on: (event: string, cb: (event: any, ctx: any) => Promise<unknown>) => {
-      handlers.set(event, cb);
-    },
-    registerCommand: () => {},
-  };
-  extension(pi as any);
-
-  const ctx = {
-    cwd,
-    modelRegistry: { find: () => ({ provider: "test", id: "model" }) },
-    signal: new AbortController().signal,
-    ui: {
-      notify: () => {},
-      setWidget: (id: string, items?: any) => {
-        widgetCalls.push({ id, items });
-      },
-    },
-  };
-
-  // session_start renders initial empty widget (no evaluation call)
-  const startHandler = handlers.get("session_start");
-  assert.ok(startHandler);
-  await startHandler({}, ctx);
-  const widget = widgetCalls.find((w) => w.id === "ai-lings-evaluations");
-  assert.ok(widget, "widget set on boot");
-  assert.ok(
-    widget.items?.some((i: string) => i.includes("○")),
-    "initial shows pending",
+  // Set up user config: enable cwd and set model
+  const userConfigFile = path.join(
+    home,
+    ".pi",
+    "agent",
+    "extensions",
+    "ai-lings",
+    "config.json",
   );
+  writeUserConfig({ directories: [cwd], model: "test/model" }, userConfigFile);
+
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const handlers = new Map<
+      string,
+      (event: any, ctx: any) => Promise<unknown>
+    >();
+    const widgetCalls: Array<{ id: string; items?: any }> = [];
+    const pi = {
+      on: (event: string, cb: (event: any, ctx: any) => Promise<unknown>) => {
+        handlers.set(event, cb);
+      },
+      registerCommand: () => {},
+    };
+    extension(pi as any);
+
+    const ctx = {
+      cwd,
+      modelRegistry: { find: () => ({ provider: "test", id: "model" }) },
+      signal: new AbortController().signal,
+      ui: {
+        notify: () => {},
+        setWidget: (id: string, items?: any) => {
+          widgetCalls.push({ id, items });
+        },
+      },
+    };
+
+    // session_start renders initial empty widget (no evaluation call)
+    const startHandler = handlers.get("session_start");
+    assert.ok(startHandler);
+    await startHandler({}, ctx);
+    const widget = widgetCalls.find((w) => w.id === "ai-lings-evaluations");
+    assert.ok(widget, "widget set on boot");
+    assert.ok(
+      widget.items?.some((i: string) => i.includes("○")),
+      "initial shows pending",
+    );
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
 });
 
 test("renders running evaluations as a highlighted banner", () => {
@@ -442,29 +382,23 @@ test("commands persist enabled directories and the evaluator model", async () =>
     await commands.get("al-enable")!("", ctx);
     await commands.get("al-model")!("test/model", ctx);
 
-    const config = readUserConfig(
-      path.join(home, ".pi", "agent", "extensions", "ai-lings", "config.json"),
+    const configFile = path.join(
+      home,
+      ".pi",
+      "agent",
+      "extensions",
+      "ai-lings",
+      "config.json",
     );
+    const config = readUserConfig(configFile);
     assert.deepEqual(config, { directories: [cwd], model: "test/model" });
-    assert.equal(readProjectConfig(cwd)?.model, "test/model");
+    assert.equal(isDirectoryEnabled(cwd, configFile), true);
 
     await commands.get("al-disable")!("", ctx);
-    assert.deepEqual(
-      readUserConfig(
-        path.join(
-          home,
-          ".pi",
-          "agent",
-          "extensions",
-          "ai-lings",
-          "config.json",
-        ),
-      ),
-      {
-        directories: [],
-        model: "test/model",
-      },
-    );
+    assert.deepEqual(readUserConfig(configFile), {
+      directories: [],
+      model: "test/model",
+    });
     assert.equal(notifications.length, 3);
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
@@ -473,33 +407,50 @@ test("commands persist enabled directories and the evaluator model", async () =>
 });
 
 test("al-eval warns when EVALUATION.yaml is missing", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-home-"));
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
-  const directory = path.join(cwd, ".pi", "ai-lings");
-  fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(
-    path.join(directory, "config.json"),
-    JSON.stringify({ enabled: true, model: "t/t" }),
+  fs.mkdirSync(path.join(cwd, ".pi", "ai-lings"), { recursive: true });
+  // Set up user config so the directory is enabled and model is set
+  const userConfigFile = path.join(
+    home,
+    ".pi",
+    "agent",
+    "extensions",
+    "ai-lings",
+    "config.json",
   );
-  const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
-  const notifyLog: string[] = [];
-  const pi = {
-    on: () => {},
-    registerCommand: (
-      name: string,
-      opts: {
-        description: string;
-        handler: (args: string, ctx: any) => Promise<void>;
+  writeUserConfig({ directories: [cwd], model: "t/t" }, userConfigFile);
+
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const commands = new Map<
+      string,
+      (args: string, ctx: any) => Promise<void>
+    >();
+    const notifyLog: string[] = [];
+    const pi = {
+      on: () => {},
+      registerCommand: (
+        name: string,
+        opts: {
+          description: string;
+          handler: (args: string, ctx: any) => Promise<void>;
+        },
+      ) => {
+        commands.set(name, opts.handler);
       },
-    ) => {
-      commands.set(name, opts.handler);
-    },
-  };
-  extension(pi as any);
-  const cmd = commands.get("al-eval");
-  assert.ok(cmd);
-  await cmd("", { cwd, ui: { notify: (m: string) => notifyLog.push(m) } });
-  assert.ok(
-    notifyLog.some((n) => n.includes("EVALUATION.yaml")),
-    "warns when no yaml",
-  );
+    };
+    extension(pi as any);
+    const cmd = commands.get("al-eval");
+    assert.ok(cmd);
+    await cmd("", { cwd, ui: { notify: (m: string) => notifyLog.push(m) } });
+    assert.ok(
+      notifyLog.some((n) => n.includes("EVALUATION.yaml")),
+      "warns when no yaml",
+    );
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
 });

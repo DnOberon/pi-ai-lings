@@ -39,7 +39,7 @@ Use these commands from Pi:
 - `/al-disable [directory]` removes a directory (or the current directory).
 - `/al-model [provider/model]` records the model used for prompt checks and `/al-eval`. Leave empty to capture the current Pi session model automatically.
 
-A project is checked only when its current directory is inside an enabled directory. The existing `.pi/ai-lings/config.json` with `"enabled": true` remains supported for per-project configuration; its model is used as a fallback when the user-level config does not enable that directory. Set its `"enabled"` to `false` for a display-only project.
+A project is enabled when its current directory is inside an enabled directory in the user config.
 
 > **Model slugs**: the format is `provider/model-id`. If the model ID itself contains a slash, only the first slash separates the provider. For example `openai/gpt-4o` or `anthropic/claude-sonnet-4-20250514`.
 

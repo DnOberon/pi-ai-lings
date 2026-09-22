@@ -9,7 +9,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const CONFIG_PATH = [".pi", "ai-lings", "config.json"];
 const RULES_PATH = [".pi", "ai-lings", "RULES.md"];
 const EVALUATION_PATH = [".pi", "ai-lings", "EVALUATION.yaml"];
 const EXPLANATION_PATH = [".pi", "ai-lings", "EXPLANATION.md"];
@@ -24,8 +23,6 @@ const USER_CONFIG_PATH = [
 const EVALUATION_TIMEOUT_MS = 5 * 60_000;
 const EVALUATION_OUTPUT_LIMIT = 1_000_000;
 
-type ProjectConfig = { model: string };
-type ProjectConfigFile = { enabled?: unknown; model?: unknown };
 type UserConfig = { directories: string[]; model?: string };
 type Verdict = { allow: boolean; reason: string };
 type Message = { content?: Array<{ type: string; text?: string }> };
@@ -37,16 +34,6 @@ type Evaluation = {
 };
 type EvaluationDocument = { exerciseName?: string; evaluations: Evaluation[] };
 type EvaluationStatus = { complete: boolean; reason: string };
-
-function readProjectConfigFile(cwd: string): ProjectConfigFile | null {
-  const filename = path.join(cwd, ...CONFIG_PATH);
-  try {
-    return JSON.parse(fs.readFileSync(filename, "utf8")) as ProjectConfigFile;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw new Error(`Could not read ${filename}: ${(error as Error).message}`);
-  }
-}
 
 function userConfigFilename(): string {
   return path.join(os.homedir(), ...USER_CONFIG_PATH);
@@ -117,28 +104,6 @@ function isDirectoryEnabled(
       (!relative.startsWith("..") && !path.isAbsolute(relative))
     );
   });
-}
-
-function readProjectConfig(cwd: string): ProjectConfig | null {
-  const projectConfig = readProjectConfigFile(cwd);
-  if (projectConfig?.enabled === false) return null;
-
-  const userConfig = readUserConfig();
-  if (isDirectoryEnabled(cwd) && userConfig.model) {
-    return { model: userConfig.model };
-  }
-  if (
-    projectConfig?.enabled === true &&
-    typeof projectConfig.model === "string" &&
-    projectConfig.model.trim()
-  ) {
-    return { model: projectConfig.model.trim() };
-  }
-  return null;
-}
-
-function isEvaluationDisplayOnly(cwd: string): boolean {
-  return readProjectConfigFile(cwd)?.enabled === false;
 }
 
 function readRules(cwd: string): string {
@@ -531,11 +496,12 @@ export default function extension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    let config: ProjectConfig | null;
     let document: EvaluationDocument | null;
+    let model: string;
     try {
-      config = readProjectConfig(ctx.cwd);
-      if (!config) return;
+      const userConfig = readUserConfig();
+      if (!(isDirectoryEnabled(ctx.cwd) && userConfig.model)) return;
+      model = userConfig.model;
       document = readEvaluations(ctx.cwd);
       if (!document) return;
     } catch (error) {
@@ -544,7 +510,7 @@ export default function extension(pi: ExtensionAPI): void {
     }
     renderEvaluationStatus(ctx, true);
     try {
-      const result = await evaluateDocument(ctx, document, "", config.model);
+      const result = await evaluateDocument(ctx, document, "", model);
       if (result) {
         statuses = result;
         renderEvaluations(ctx, document, statuses);
@@ -554,16 +520,16 @@ export default function extension(pi: ExtensionAPI): void {
     }
   });
   pi.on("input", async (event, ctx): Promise<InputEventResult> => {
-    let config: ProjectConfig | null;
     try {
-      config = readProjectConfig(ctx.cwd);
-      if (!config) return { action: "continue" };
+      const userConfig = readUserConfig();
+      if (!(isDirectoryEnabled(ctx.cwd) && userConfig.model))
+        return { action: "continue" };
 
       const verdict = await evaluatePrompt(
         ctx,
         event.text,
         readRules(ctx.cwd),
-        config.model,
+        userConfig.model,
       );
       if (verdict?.allow === true) return { action: "continue" };
 
@@ -657,15 +623,12 @@ export default function extension(pi: ExtensionAPI): void {
     description: "Run exercise evaluations in EVALUATION.yaml",
     handler: async (args, ctx) => {
       const prompt = args || lastPrompt;
-      const config = readProjectConfig(ctx.cwd);
-      if (!config) {
-        if (isEvaluationDisplayOnly(ctx.cwd)) {
-          const document = readEvaluations(ctx.cwd);
-          if (document) renderEvaluations(ctx, document, statuses);
-          else ctx.ui.notify("No EVALUATION.yaml found", "warning");
-          return;
-        }
-        ctx.ui.notify("ai-lings is not enabled (no config.json)", "warning");
+      const userConfig = readUserConfig();
+      if (!(isDirectoryEnabled(ctx.cwd) && userConfig.model)) {
+        ctx.ui.notify(
+          "ai-lings is not enabled (enable with /al-enable, set model with /al-model)",
+          "warning",
+        );
         return;
       }
       const document = readEvaluations(ctx.cwd);
@@ -679,7 +642,7 @@ export default function extension(pi: ExtensionAPI): void {
           ctx,
           document,
           prompt,
-          config.model,
+          userConfig.model,
         );
         if (!result) {
           ctx.ui.notify("Evaluator returned malformed results", "warning");
@@ -701,7 +664,6 @@ export {
   parseVerdict,
   readEvaluations,
   readExplanation,
-  readProjectConfig,
   readUserConfig,
   renderEvaluationStatus,
   splitModelSlug,
