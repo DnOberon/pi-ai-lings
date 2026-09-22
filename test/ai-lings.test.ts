@@ -219,6 +219,61 @@ test("maps Git renames to deleted and added paths", () => {
   ]);
 });
 
+test("reuses successful summaries until a file mtime changes", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-state-"));
+  execFileSync("git", ["init", "-q"], { cwd, stdio: "ignore" });
+  const filename = path.join(cwd, "added.ts");
+  fs.writeFileSync(filename, "export const added = true;\n");
+  let calls = 0;
+  const summarize = async () => {
+    calls += 1;
+    return `summary ${calls}`;
+  };
+
+  assert.equal(
+    (await buildEvaluationState(cwd, "test/model", { summarize }))
+      .changed_files[0].summary,
+    "summary 1",
+  );
+  assert.equal(
+    (await buildEvaluationState(cwd, "test/model", { summarize }))
+      .changed_files[0].summary,
+    "summary 1",
+  );
+  fs.utimesSync(filename, new Date(), new Date(Date.now() + 2_000));
+  assert.equal(
+    (await buildEvaluationState(cwd, "test/model", { summarize }))
+      .changed_files[0].summary,
+    "summary 2",
+  );
+  assert.equal(calls, 2);
+});
+
+test("does not cache a failed state build", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-state-"));
+  execFileSync("git", ["init", "-q"], { cwd, stdio: "ignore" });
+  fs.writeFileSync(path.join(cwd, "added.ts"), "export const added = true;\n");
+  let calls = 0;
+  await assert.rejects(
+    buildEvaluationState(cwd, "test/model", {
+      summarize: async () => {
+        calls += 1;
+        throw new Error("failed");
+      },
+    }),
+  );
+  await assert.rejects(
+    buildEvaluationState(cwd, "test/model", {
+      summarize: async () => {
+        calls += 1;
+        throw new Error("failed again");
+      },
+    }),
+    /failed again/,
+  );
+  assert.equal(calls, 2);
+});
+
 test("rejects empty or failed state summaries instead of inventing one", async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-state-"));
   execFileSync("git", ["init", "-q"], { cwd, stdio: "ignore" });

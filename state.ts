@@ -21,6 +21,15 @@ const SUMMARY_STDERR_LIMIT = 64_000;
 const SUMMARY_STDOUT_LIMIT = 256_000;
 const SUMMARY_CONCURRENCY = 3;
 
+type CachedSummary = {
+  mtimeMs: number;
+  status: EvaluationStateFile["status"];
+  summary: string;
+};
+
+// Intentionally process-local: /al-state caching resets when Pi restarts.
+const successfulSummaries = new Map<string, CachedSummary>();
+
 type SummaryInput = Pick<EvaluationStateFile, "path" | "status"> & {
   context: string;
 };
@@ -272,14 +281,34 @@ async function runConcurrent<T, R>(
   return results;
 }
 
+function fileMtime(cwd: string, change: Change): number | undefined {
+  try {
+    return fs.statSync(path.join(cwd, change.path)).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function buildEvaluationState(
   cwd: string,
   modelSlug: string,
   options: StateBuilderOptions = {},
 ): Promise<EvaluationState> {
   const changes = collectChangedFiles(cwd);
+  const cacheKeys = changes.map((change) => `${cwd}\0${change.path}`);
+  const cached = changes.map((change, index) => {
+    const mtimeMs = fileMtime(cwd, change);
+    const entry = successfulSummaries.get(cacheKeys[index]);
+    return entry &&
+      mtimeMs !== undefined &&
+      entry.mtimeMs === mtimeMs &&
+      entry.status === change.status
+      ? entry
+      : undefined;
+  });
+  const pending = changes.filter((_, index) => !cached[index]);
   const summaries = await runConcurrent(
-    changes,
+    pending,
     async (change, index) => {
       if (options.signal?.aborted)
         throw new DOMException("Aborted", "AbortError");
@@ -290,16 +319,30 @@ export async function buildEvaluationState(
       )(input, modelSlug);
       if (!summary.trim())
         throw new Error(`Summary is empty for ${change.path}`);
-      options.onProgress?.(index + 1, changes.length, change.path);
+      options.onProgress?.(index + 1, pending.length, change.path);
       return summary.trim();
     },
     SUMMARY_CONCURRENCY,
     options.signal,
   );
-  const changed_files = changes.map((change, i) => ({
+  const pendingSummaries = new Map(
+    pending.map((change, index) => [change.path, summaries[index]]),
+  );
+  const changed_files = changes.map((change, index) => ({
     ...change,
-    summary: summaries[i],
+    summary: cached[index]?.summary ?? pendingSummaries.get(change.path)!,
   }));
+  // Commit only after every summary succeeds, so failed runs are never cached.
+  pending.forEach((change) => {
+    const mtimeMs = fileMtime(cwd, change);
+    const summary = pendingSummaries.get(change.path);
+    if (mtimeMs !== undefined && summary !== undefined)
+      successfulSummaries.set(`${cwd}\0${change.path}`, {
+        mtimeMs,
+        status: change.status,
+        summary,
+      });
+  });
   return { changed_files };
 }
 

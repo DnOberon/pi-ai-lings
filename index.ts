@@ -159,9 +159,9 @@ export default function extension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => {
       try {
         const userConfig = readUserConfig();
-        if (!(isDirectoryEnabled(ctx.cwd) && userConfig.model)) {
+        if (!userConfig.model) {
           ctx.ui.notify(
-            "ai-lings is not enabled (enable with /al-enable, set model with /al-model)",
+            "ai-lings needs a model (set with /al-model)",
             "warning",
           );
           return;
@@ -198,11 +198,8 @@ export default function extension(pi: ExtensionAPI): void {
     description: "Run exercise evaluations in EVALUATION.yaml",
     handler: async (_args, ctx) => {
       const userConfig = readUserConfig();
-      if (!(isDirectoryEnabled(ctx.cwd) && userConfig.model)) {
-        ctx.ui.notify(
-          "ai-lings is not enabled (enable with /al-enable, set model with /al-model)",
-          "warning",
-        );
+      if (!userConfig.model) {
+        ctx.ui.notify("ai-lings needs a model (set with /al-model)", "warning");
         return;
       }
       const document = readEvaluations(ctx.cwd);
