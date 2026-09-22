@@ -37,7 +37,7 @@ Use these commands from Pi:
 
 - `/al-enable [directory]` adds a directory (or the current directory) and its children.
 - `/al-disable [directory]` removes a directory (or the current directory).
-- `/al-model [provider/model]` records the model used for prompt checks and `/al-eval`. Leave empty to capture the current Pi session model automatically.
+- `/al-model [provider/model]` records the model used for prompt checks and automatic evaluations. Leave empty to capture the current Pi session model automatically.
 
 A project is enabled when its current directory is inside an enabled directory in the user config.
 
@@ -112,7 +112,7 @@ The widget updates in place:
 ### When evaluation runs
 
 - **Session start**: widget appears with all objectives empty (○).
-- **`/al-eval`**: run it anytime for a fresh assessment. Especially useful after you've made progress.
+- **`/al-eval`**: keeps the evaluation widget flow in place but currently reports that evaluation logic is unavailable.
 - **After every agent turn**: the evaluator re-checks automatically when the agent settles (only if the directory is enabled).
 
 ## EXPLANATION.md
@@ -202,7 +202,7 @@ Pick a model you trust to evaluate rules fairly. Small/cheap models sometimes mi
 - **Rules are for the prompt, not the code**. The prompt gate can't inspect your files, only what you're about to ask. Use `EVALUATION.yaml` for code-level checks.
 - **`show: true` is your friend**. When an objective fails, the learner sees *why*. Without it, they just see ○ with no explanation.
 - **Start strict, relax later**. It's easier to loosen a rule that's too tight than to discover a loophole after learners exploit it.
-- **The evaluator model matters**. A weak model may accept prompts that break rules or miss obvious code issues. The model you configure runs both the prompt gate and the `/al-eval` checks.
+- **The evaluator model matters**. A weak model may accept prompts that break rules or miss obvious code issues. The model you configure runs the prompt gate and automatic evaluation checks.
 - **`enabled: false` for soft launch**. Deploy the exercise with the gate off, let learners explore, then flip it on once you're confident the rules work.
 
 ## Development

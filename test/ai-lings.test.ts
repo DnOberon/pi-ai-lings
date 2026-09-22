@@ -355,6 +355,63 @@ test("al-eval warns when config is missing", async () => {
   );
 });
 
+test("al-eval keeps the UI flow without running evaluation logic", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-home-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
+  fs.mkdirSync(path.join(cwd, ".pi", "ai-lings"), { recursive: true });
+  fs.writeFileSync(
+    path.join(cwd, ".pi", "ai-lings", "EVALUATION.yaml"),
+    `exercise_name: Test
+evaluations:
+  - name: Ready
+    show: true
+    criteria:
+      - A file exists
+`,
+  );
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    writeUserConfig(
+      { directories: [cwd], model: "test/model" },
+      path.join(home, ".pi", "agent", "extensions", "ai-lings", "config.json"),
+    );
+    const commands = new Map<
+      string,
+      (args: string, ctx: any) => Promise<void>
+    >();
+    const notifications: string[] = [];
+    const widgets: Array<{ id: string; items?: any }> = [];
+    const pi = {
+      on: () => {},
+      registerCommand: (
+        name: string,
+        opts: { handler: (args: string, ctx: any) => Promise<void> },
+      ) => commands.set(name, opts.handler),
+    };
+    extension(pi as any);
+    await commands.get("al-eval")!("", {
+      cwd,
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setWidget: (id: string, items?: any) => widgets.push({ id, items }),
+        theme: {
+          bold: (text: string) => text,
+          bg: (_color: string, text: string) => text,
+        },
+      },
+    });
+    assert.ok(notifications.includes("Evaluation logic is not implemented"));
+    assert.deepEqual(
+      widgets.find((widget) => widget.id === "ai-lings-evaluations")?.items,
+      ["Evaluation Criteria: Test", "○ Ready"],
+    );
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
+});
+
 test("commands persist enabled directories and the evaluator model", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-home-"));
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ai-lings-"));
